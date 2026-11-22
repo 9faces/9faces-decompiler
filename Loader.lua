@@ -1562,7 +1562,7 @@ local function FindBytefall()
 end
 local Ninefaces = {
     Name = "9faces Decompiler",
-    Version = "0.3.0-beta.6",
+    Version = "0.3.0-beta.7",
     BytecodeVersionMin = BytecodeVersionMin,
     BytecodeVersionMax = BytecodeVersionMax,
     BytefallFallback = nil,
@@ -1685,20 +1685,26 @@ function Ninefaces.Decompile(Source, Options)
         Ninefaces.LastError = nil
         return NativeSource
     end
-    local Fallback = Ninefaces.GetBytefallFallback()
-    if type(Fallback) == "function" then
-        local FallbackSuccess, FallbackResult = pcall(Fallback, Source, Bytecode, Options)
-        if FallbackSuccess and type(FallbackResult) == "string" and FallbackResult ~= "" then
-            Ninefaces.LastError = nil
-            return FallbackResult
+    local Fallback
+    local BytefallStatus
+    if Options and Options.SkipBytefallFallback == true then
+        BytefallStatus = "Bytefall fallback is managed by the host integration"
+    else
+        Fallback = Ninefaces.GetBytefallFallback()
+        if type(Fallback) == "function" then
+            local FallbackSuccess, FallbackResult = pcall(Fallback, Source, Bytecode, Options)
+            if FallbackSuccess and type(FallbackResult) == "string" and FallbackResult ~= "" then
+                Ninefaces.LastError = nil
+                return FallbackResult
+            end
+            if not FallbackSuccess then
+                NativeError = NativeError .. " | Bytefall: " .. tostring(FallbackResult)
+            else
+                NativeError = NativeError .. " | Bytefall returned no source"
+            end
         end
-        if not FallbackSuccess then
-            NativeError = NativeError .. " | Bytefall: " .. tostring(FallbackResult)
-        else
-            NativeError = NativeError .. " | Bytefall returned no source"
-        end
+        BytefallStatus = type(Fallback) == "function" and "Bytefall failed" or "Bytefall fallback is not connected. Register the local Bytefall function with Ninefaces.SetBytefallFallback(callback)"
     end
-    local BytefallStatus = type(Fallback) == "function" and "Bytefall failed" or "Bytefall fallback is not connected. Register the local Bytefall function with Ninefaces.SetBytefallFallback(callback)"
     Ninefaces.LastError = tostring(NativeError or "Native reconstruction failed") .. " | " .. BytefallStatus
     return nil, Ninefaces.LastError
 end
