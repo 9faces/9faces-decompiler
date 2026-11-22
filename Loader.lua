@@ -627,7 +627,7 @@ local function GetDebugLocalName(Proto, Register, PC, UsedNames, UsePascalCase)
             return Name
         end
     end
-    local Base = "Local" .. tostring(Register + 1)
+    local Base = Register < Proto.NumParams and ("Argument" .. tostring(Register + 1)) or ("Temp" .. tostring(Register + 1))
     local Name = Base
     local Suffix = 2
     while UsedNames[Name] do
@@ -650,6 +650,76 @@ local function ReconstructLinear(Proto, Strings, Options, Parsed, CaptureNames, 
     local function EmitLine(Value)
         Lines[#Lines + 1] = string.rep("    ", IndentLevel) .. tostring(Value)
     end
+    local RegisterUseCounts = {}
+    local function AddRegisterUse(Register)
+        if type(Register) == "number" and Register >= 0 and Register < Proto.MaxStackSize then
+            RegisterUseCounts[Register] = (RegisterUseCounts[Register] or 0) + 1
+        end
+    end
+    local function AddRegisterRange(First, Last)
+        for Register = First, math.min(Last, Proto.MaxStackSize - 1) do
+            AddRegisterUse(Register)
+        end
+    end
+    for _, Item in ipairs(Proto.Instructions) do
+        local ItemName = Item.Name
+        local ItemA = Item.A
+        local ItemB = Item.B
+        local ItemC = Item.C
+        if ItemName == "MOVE" or ItemName == "SETGLOBAL" or ItemName == "SETUPVAL" or ItemName == "NOT" or ItemName == "MINUS" or ItemName == "LENGTH" then
+            AddRegisterUse(ItemName == "MOVE" and ItemB or ItemA)
+        elseif ItemName == "GETTABLEKS" or ItemName == "GETTABLEN" or ItemName == "GETUDATAKS" then
+            AddRegisterUse(ItemB)
+        elseif ItemName == "GETTABLE" then
+            AddRegisterUse(ItemB)
+            AddRegisterUse(ItemC)
+        elseif ItemName == "SETTABLE" then
+            AddRegisterUse(ItemA)
+            AddRegisterUse(ItemB)
+            AddRegisterUse(ItemC)
+        elseif ItemName == "SETTABLEKS" or ItemName == "SETTABLEN" or ItemName == "SETUDATAKS" then
+            AddRegisterUse(ItemA)
+            AddRegisterUse(ItemB)
+        elseif ItemName == "ADD" or ItemName == "SUB" or ItemName == "MUL" or ItemName == "DIV" or ItemName == "MOD" or ItemName == "POW" or ItemName == "IDIV" or ItemName == "AND" or ItemName == "OR" or ItemName == "CONCAT" then
+            AddRegisterRange(ItemB, ItemC)
+        elseif ItemName == "ADDK" or ItemName == "SUBK" or ItemName == "MULK" or ItemName == "DIVK" or ItemName == "MODK" or ItemName == "POWK" or ItemName == "IDIVK" or ItemName == "ANDK" or ItemName == "ORK" then
+            AddRegisterUse(ItemB)
+        elseif ItemName == "SUBRK" or ItemName == "DIVRK" then
+            AddRegisterUse(ItemC)
+        elseif ItemName == "NAMECALL" or ItemName == "NAMECALLUDATA" then
+            AddRegisterUse(ItemB)
+        elseif ItemName == "CALL" or ItemName == "CALLFB" then
+            AddRegisterUse(ItemA)
+            if ItemB == 0 then
+                AddRegisterRange(ItemA + 1, Proto.MaxStackSize - 1)
+            elseif ItemB > 1 then
+                AddRegisterRange(ItemA + 1, ItemA + ItemB - 1)
+            end
+        elseif ItemName == "RETURN" then
+            if ItemB == 0 then
+                AddRegisterRange(ItemA, Proto.MaxStackSize - 1)
+            elseif ItemB > 1 then
+                AddRegisterRange(ItemA, ItemA + ItemB - 2)
+            end
+        elseif ItemName == "SETLIST" then
+            AddRegisterUse(ItemA)
+            if ItemC == 0 then
+                AddRegisterRange(ItemB, Proto.MaxStackSize - 1)
+            elseif ItemC > 1 then
+                AddRegisterRange(ItemB, ItemB + ItemC - 2)
+            end
+        elseif ItemName == "JUMPIF" or ItemName == "JUMPIFNOT" or ItemName == "JUMPIFEQ" or ItemName == "JUMPIFLE" or ItemName == "JUMPIFLT" or ItemName == "JUMPIFNOTEQ" or ItemName == "JUMPIFNOTLE" or ItemName == "JUMPIFNOTLT" or ItemName == "JUMPXEQKNIL" or ItemName == "JUMPXEQKB" or ItemName == "JUMPXEQKN" or ItemName == "JUMPXEQKS" then
+            AddRegisterUse(ItemA)
+            if Item.Aux and (ItemName == "JUMPIFEQ" or ItemName == "JUMPIFLE" or ItemName == "JUMPIFLT" or ItemName == "JUMPIFNOTEQ" or ItemName == "JUMPIFNOTLE" or ItemName == "JUMPIFNOTLT") then
+                AddRegisterUse(Item.Aux % 256)
+            end
+        elseif ItemName == "FORNPREP" or ItemName == "FORNLOOP" or ItemName == "FORGLOOP" then
+            AddRegisterRange(ItemA, ItemA + 2)
+        elseif ItemName == "CAPTURE" and (ItemA == 0 or ItemA == 1) then
+            AddRegisterUse(ItemB)
+        end
+        YieldControl()
+    end
     local Registers = {}
     local Declared = {}
     local UsedNames = {}
@@ -660,6 +730,7 @@ local function ReconstructLinear(Proto, Strings, Options, Parsed, CaptureNames, 
     end
     local NameCalls = {}
     local RegisterExpressions = {}
+    local RegisterInline = {}
     local KnownValues = {}
     local KnownValueFlags = {}
     local RegisterWritten = {}
@@ -677,6 +748,9 @@ local function ReconstructLinear(Proto, Strings, Options, Parsed, CaptureNames, 
         HighestRegister = math.max(HighestRegister, Register)
     end
     local function GetReg(Register, PC)
+        if RegisterInline[Register] then
+            return RegisterExpressions[Register] or "nil"
+        end
         local Value = Registers[Register]
         if not Value then
             local DebugName = GetDebugLocalName(Proto, Register, PC or CurrentPC, UsedNames, UsePascalCase)
@@ -686,6 +760,9 @@ local function ReconstructLinear(Proto, Strings, Options, Parsed, CaptureNames, 
         return Value
     end
     local function GetRegExpression(Register)
+        if RegisterInline[Register] then
+            return RegisterExpressions[Register] or "nil"
+        end
         return RegisterExpressions[Register] or GetReg(Register)
     end
     local function FormatKnownValue(Value)
@@ -769,7 +846,33 @@ local function ReconstructLinear(Proto, Strings, Options, Parsed, CaptureNames, 
         end
         return Name
     end
-    local function WriteReg(Register, Expression, PC, KnownValue, IsKnown, ExpressionValue)
+    local function HasNamedDebugLocal(Register, PC)
+        for _, Local in ipairs(Proto.DebugLocals) do
+            if Local.Register == Register and Local.StartPC <= PC and Local.EndPC > PC and type(Local.Name) == "string" and Local.Name ~= "" and not IsGenericDebugName(Local.Name) then
+                return true
+            end
+        end
+        return false
+    end
+    local function WriteReg(Register, Expression, PC, KnownValue, IsKnown, ExpressionValue, InlineCandidate)
+        local CanInline = InlineCandidate == true
+            and RegisterUseCounts[Register] == 1
+            and not Declared[Register]
+            and not RegisterWritten[Register]
+            and not HasNamedDebugLocal(Register, PC)
+        HighestRegister = math.max(HighestRegister, Register)
+        RegisterWritten[Register] = true
+        RegisterExpressions[Register] = ExpressionValue or Expression
+        RegisterInline[Register] = CanInline
+        KnownValueFlags[Register] = IsKnown == true
+        if IsKnown == true then
+            KnownValues[Register] = KnownValue
+        else
+            KnownValues[Register] = nil
+        end
+        if CanInline then
+            return nil
+        end
         local ExistingName = Registers[Register]
         if not ExistingName then
             ExistingName = GetDebugLocalName(Proto, Register, PC, UsedNames, UsePascalCase)
@@ -787,6 +890,7 @@ local function ReconstructLinear(Proto, Strings, Options, Parsed, CaptureNames, 
             Registers[Register] = Name
         end
         RegisterWritten[Register] = true
+        RegisterInline[Register] = false
         local Name = DeclareRegister(Register, PC)
         HighestRegister = math.max(HighestRegister, Register)
         RegisterExpressions[Register] = ExpressionValue or Expression
@@ -1190,9 +1294,9 @@ local function ReconstructLinear(Proto, Strings, Options, Parsed, CaptureNames, 
             return nil, "CMPPROTO class dispatch requires advanced reconstruction"
         elseif Name == "NOP" or Name == "BREAK" or Name == "CLOSEUPVALS" or Name == "PREPVARARGS" or Name == "COVERAGE" or Name == "NATIVECALL" or Name == "FASTCALL" or Name == "FASTCALL1" or Name == "FASTCALL2" or Name == "FASTCALL2K" or Name == "FASTCALL3" or Name == "FASTPCALL" then
         elseif Name == "LOADNIL" then
-            WriteReg(A, "nil", PC, nil, true)
+            WriteReg(A, "nil", PC, nil, true, nil, true)
         elseif Name == "LOADB" then
-            WriteReg(A, B ~= 0 and "true" or "false", PC, B ~= 0, true)
+            WriteReg(A, B ~= 0 and "true" or "false", PC, B ~= 0, true, nil, true)
             if C ~= 0 then
                 local TargetPc = PC + C + 1
                 local TargetIndex = InstructionIndexByPc[TargetPc]
@@ -1206,24 +1310,24 @@ local function ReconstructLinear(Proto, Strings, Options, Parsed, CaptureNames, 
                 continue
             end
         elseif Name == "LOADN" then
-            WriteReg(A, tostring(Instruction.D), PC, Instruction.D, true)
+            WriteReg(A, tostring(Instruction.D), PC, Instruction.D, true, nil, true)
         elseif Name == "LOADK" then
             local Constant = GetConstant(Proto, Instruction.D)
             local KnownValue, IsKnown = GetConstantKnown(Constant)
-            WriteReg(A, ConstantExpression(Proto, Instruction.D, Strings), PC, KnownValue, IsKnown)
+            WriteReg(A, ConstantExpression(Proto, Instruction.D, Strings), PC, KnownValue, IsKnown, nil, true)
         elseif Name == "LOADKX" then
             local Constant = GetConstant(Proto, Aux)
             local KnownValue, IsKnown = GetConstantKnown(Constant)
-            WriteReg(A, ConstantExpression(Proto, Aux, Strings), PC, KnownValue, IsKnown)
+            WriteReg(A, ConstantExpression(Proto, Aux, Strings), PC, KnownValue, IsKnown, nil, true)
         elseif Name == "MOVE" then
-            WriteReg(A, GetReg(B), PC, KnownValues[B], KnownValueFlags[B], GetRegExpression(B))
+            WriteReg(A, GetReg(B), PC, KnownValues[B], KnownValueFlags[B], GetRegExpression(B), true)
         elseif Name == "GETGLOBAL" then
             local Key = GetConstant(Proto, Aux % 16777216)
             if Key.Kind ~= "String" then
                 return nil, "GETGLOBAL does not reference a string constant"
             end
             local Expression = IsIdentifier(Key.Value) and Key.Value or "_G[" .. Quote(Key.Value) .. "]"
-            WriteReg(A, Expression, PC, nil, false, Expression)
+            WriteReg(A, Expression, PC, nil, false, Expression, true)
         elseif Name == "SETGLOBAL" then
             local Key = GetConstant(Proto, Aux % 16777216)
             if Key.Kind ~= "String" then
@@ -1236,7 +1340,7 @@ local function ReconstructLinear(Proto, Strings, Options, Parsed, CaptureNames, 
             if UsePascalCase and not CaptureNames[B + 1] then
                 UpvalueName = PascalCase(UpvalueName)
             end
-            WriteReg(A, UpvalueName, PC, nil, false, UpvalueName)
+            WriteReg(A, UpvalueName, PC, nil, false, UpvalueName, true)
         elseif Name == "SETUPVAL" then
             local UpvalueName = CaptureNames[B + 1] or Proto.DebugUpvalues[B + 1] or ("Upvalue" .. tostring(B + 1))
             if UsePascalCase and not CaptureNames[B + 1] then
@@ -1251,7 +1355,7 @@ local function ReconstructLinear(Proto, Strings, Options, Parsed, CaptureNames, 
             end
             local Expression = GetProperty(GetReg(B), Key.Value)
             local ExpressionValue = GetProperty(GetRegExpression(B), Key.Value)
-            WriteReg(A, Expression, PC, nil, false, ExpressionValue)
+            WriteReg(A, Expression, PC, nil, false, ExpressionValue, true)
         elseif Name == "GETTABLE" then
             WriteReg(A, GetReg(B) .. "[" .. GetReg(C) .. "]", PC)
         elseif Name == "GETTABLEN" then
@@ -1275,7 +1379,7 @@ local function ReconstructLinear(Proto, Strings, Options, Parsed, CaptureNames, 
                 Folded, FoldedValue = TryFoldBinary(Name, KnownValues[B], KnownValues[C])
             end
             local Expression = Folded and FormatKnownValue(FoldedValue) or ("(" .. GetReg(B) .. " " .. Operators[Name] .. " " .. GetReg(C) .. ")")
-            WriteReg(A, Expression, PC, FoldedValue, Folded)
+            WriteReg(A, Expression, PC, FoldedValue, Folded, nil, true)
         elseif Name == "ADDK" or Name == "SUBK" or Name == "MULK" or Name == "DIVK" or Name == "MODK" or Name == "POWK" or Name == "IDIVK" or Name == "ANDK" or Name == "ORK" then
             local Operators = {ADDK = "+", SUBK = "-", MULK = "*", DIVK = "/", MODK = "%", POWK = "^", IDIVK = "//", ANDK = "and", ORK = "or"}
             local Constant = GetConstant(Proto, C)
@@ -1286,7 +1390,7 @@ local function ReconstructLinear(Proto, Strings, Options, Parsed, CaptureNames, 
                 Folded, FoldedValue = TryFoldBinary(BaseName, KnownValues[B], ConstantValue)
             end
             local Expression = Folded and FormatKnownValue(FoldedValue) or ("(" .. GetReg(B) .. " " .. Operators[Name] .. " " .. ConstantExpression(Proto, C, Strings) .. ")")
-            WriteReg(A, Expression, PC, FoldedValue, Folded)
+            WriteReg(A, Expression, PC, FoldedValue, Folded, nil, true)
         elseif Name == "SUBRK" or Name == "DIVRK" then
             local Operator = Name == "SUBRK" and "-" or "/"
             local Constant = GetConstant(Proto, B)
@@ -1296,22 +1400,22 @@ local function ReconstructLinear(Proto, Strings, Options, Parsed, CaptureNames, 
                 Folded, FoldedValue = TryFoldBinary(Name == "SUBRK" and "SUB" or "DIV", ConstantValue, KnownValues[C])
             end
             local Expression = Folded and FormatKnownValue(FoldedValue) or ("(" .. ConstantExpression(Proto, B, Strings) .. " " .. Operator .. " " .. GetReg(C) .. ")")
-            WriteReg(A, Expression, PC, FoldedValue, Folded)
+            WriteReg(A, Expression, PC, FoldedValue, Folded, nil, true)
         elseif Name == "NOT" then
             local IsKnown = KnownValueFlags[B] == true
             local Value = false
             if IsKnown then
                 Value = not KnownValues[B]
             end
-            WriteReg(A, IsKnown and (Value and "true" or "false") or ("(not " .. GetReg(B) .. ")"), PC, Value, IsKnown)
+            WriteReg(A, IsKnown and (Value and "true" or "false") or ("(not " .. GetReg(B) .. ")"), PC, Value, IsKnown, nil, true)
         elseif Name == "MINUS" then
             local IsKnown = KnownValueFlags[B] and type(KnownValues[B]) == "number"
             local Value = IsKnown and -KnownValues[B] or nil
-            WriteReg(A, IsKnown and FormatKnownValue(Value) or ("(-" .. GetReg(B) .. ")"), PC, Value, IsKnown and FormatKnownValue(Value) ~= nil)
+            WriteReg(A, IsKnown and FormatKnownValue(Value) or ("(-" .. GetReg(B) .. ")"), PC, Value, IsKnown and FormatKnownValue(Value) ~= nil, nil, true)
         elseif Name == "LENGTH" then
             local IsKnown = KnownValueFlags[B] and type(KnownValues[B]) == "string"
             local Value = IsKnown and #KnownValues[B] or nil
-            WriteReg(A, IsKnown and tostring(Value) or ("(#" .. GetReg(B) .. ")"), PC, Value, IsKnown)
+            WriteReg(A, IsKnown and tostring(Value) or ("(#" .. GetReg(B) .. ")"), PC, Value, IsKnown, nil, true)
         elseif Name == "CONCAT" then
             local Parts = {}
             local Values = {}
@@ -1325,7 +1429,7 @@ local function ReconstructLinear(Proto, Strings, Options, Parsed, CaptureNames, 
                 end
             end
             local FoldedValue = AllKnown and table.concat(Values) or nil
-            WriteReg(A, AllKnown and Quote(FoldedValue) or ("(" .. table.concat(Parts, " .. ") .. ")"), PC, FoldedValue, AllKnown)
+            WriteReg(A, AllKnown and Quote(FoldedValue) or ("(" .. table.concat(Parts, " .. ") .. ")"), PC, FoldedValue, AllKnown, nil, true)
         elseif Name == "NEWTABLE" then
             WriteReg(A, "{}", PC)
         elseif Name == "DUPTABLE" then
@@ -1360,7 +1464,7 @@ local function ReconstructLinear(Proto, Strings, Options, Parsed, CaptureNames, 
                     Expression = Expression .. "." .. ImportParts[ImportIndex]
                 end
             end
-            WriteReg(A, Expression, PC, nil, false, Expression)
+            WriteReg(A, Expression, PC, nil, false, Expression, true)
         elseif Name == "NAMECALL" or Name == "NAMECALLUDATA" then
             local ConstantIndex = Name == "NAMECALLUDATA" and (Aux % 65536) or Aux
             local MethodConstant = GetConstant(Proto, ConstantIndex)
@@ -1713,7 +1817,7 @@ local function FindBytefall()
 end
 local Ninefaces = {
     Name = "9faces Decompiler",
-    Version = "0.3.0-beta.12",
+    Version = "0.3.0-beta.13",
     BytecodeVersionMin = BytecodeVersionMin,
     BytecodeVersionMax = BytecodeVersionMax,
     BytefallFallback = nil,
