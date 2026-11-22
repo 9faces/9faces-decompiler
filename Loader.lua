@@ -481,7 +481,7 @@ local function ParseBytecode(Data)
         error("Compiler error: " .. Data:sub(2), 0)
     end
     if Version < BytecodeVersionMin or Version > BytecodeVersionMax then
-        error("9faces supports bytecode versions " .. tostring(BytecodeVersionMin) .. " through " .. tostring(BytecodeVersionMax) .. "; received version " .. tostring(Version), 0)
+        error("Valm Decompiler supports bytecode versions " .. tostring(BytecodeVersionMin) .. " through " .. tostring(BytecodeVersionMax) .. "; received version " .. tostring(Version), 0)
     end
     local TypeVersion = 0
     if Version >= 4 then
@@ -888,12 +888,16 @@ local function ReconstructLinear(Proto, Strings, Options, Parsed, CaptureNames, 
         return Lower == "variable"
             or Lower == "callback"
             or Lower == "instance"
+            or Lower == "pcall"
+            or Lower == "xpcall"
             or Lower:match("^arg%d+$") ~= nil
             or Lower:match("^local%d+$") ~= nil
             or Lower:match("^var%d+$") ~= nil
             or Lower:match("^v%d+$") ~= nil
             or Lower:match("^temp%d+$") ~= nil
             or Lower:match("^tmp%d+$") ~= nil
+            or Lower:match("^pcall%d+$") ~= nil
+            or Lower:match("^xpcall%d+$") ~= nil
     end
     local function InferRegisterName(Expression, Register)
         local ServiceName = Expression:match('GetService%s*%(%s*"([^"]+)"')
@@ -908,6 +912,42 @@ local function ReconstructLinear(Proto, Strings, Options, Parsed, CaptureNames, 
             or Expression:match('FindFirstChild%s*%(%s*"([^"]+)"')
         if ChildName and ChildName ~= "" then
             return PascalCase(ChildName)
+        end
+        local IndexedName = Expression:match('%[%s*"([^"]+)"%s*%]$')
+        if IndexedName and IndexedName ~= "" then
+            return PascalCase(IndexedName)
+        end
+        local MethodName = Expression:match("[:%.]([%a_][%w_]*)%s*%(")
+        local MethodResults = {
+            GetChildren = "Children",
+            GetDescendants = "Descendants",
+            GetPlayers = "Players",
+            GetAttributes = "Attributes",
+            GetAttribute = "Attribute",
+            GetFullName = "FullName",
+            GetName = "Name",
+            GetPivot = "Pivot",
+            GetDebugId = "DebugId",
+            GetMouse = "Mouse",
+            GetMouseLocation = "MouseLocation",
+            GetProductInfo = "ProductInfo",
+            GetUserThumbnailAsync = "Thumbnail",
+            GetUserIdFromNameAsync = "UserId",
+            GetNameFromUserIdAsync = "Username",
+            GetPropertyChangedSignal = "PropertyChangedSignal",
+            GetAsync = "Response",
+            PostAsync = "Response",
+            HttpGet = "Response",
+            RequestAsync = "Response",
+            JSONDecode = "DecodedData",
+            JSONEncode = "EncodedData",
+            Connect = "Connection",
+            Once = "Connection",
+            Clone = "Clone"
+        }
+        local MethodResult = MethodName and MethodResults[MethodName]
+        if MethodResult then
+            return PascalCase(MethodResult)
         end
         if Expression == "game" then
             return "Game"
@@ -1001,9 +1041,15 @@ local function ReconstructLinear(Proto, Strings, Options, Parsed, CaptureNames, 
             ExistingName = GetDebugLocalName(Proto, Register, PC, UsedNames, UsePascalCase)
             Registers[Register] = ExistingName
         end
-        if not ActiveLocal and Register >= Proto.NumParams and not RegisterWritten[Register] and not Declared[Register] and IsGenericDebugName(ExistingName) then
+        if Register >= Proto.NumParams and not RegisterWritten[Register] and not Declared[Register] and IsGenericDebugName(ExistingName) and (not ActiveLocal or IsGenericDebugName(ActiveLocal.Name)) then
             local BaseName = InferRegisterName(ExpressionValue or Expression, Register)
-            Registers[Register] = GetFreshRegisterName(BaseName)
+            local ExistingBase = ActiveLocal and PascalCase(ActiveLocal.Name) or nil
+            if ExistingBase ~= BaseName then
+                Registers[Register] = GetFreshRegisterName(BaseName)
+                if ActiveLocal then
+                    DebugLocalNames[ActiveLocal] = Registers[Register]
+                end
+            end
         end
         local WasDeclared = Declared[Register] == true
         RegisterWritten[Register] = true
@@ -1699,7 +1745,8 @@ local function ReconstructLinear(Proto, Strings, Options, Parsed, CaptureNames, 
             elseif ResultCount <= 16 then
                 local ResultNames = {}
                 local ResultWasDeclared = {}
-                local IsProtectedCall = not MethodCall and (FunctionExpression == "pcall" or FunctionExpression == "xpcall")
+                local FunctionLookup = type(FunctionExpression) == "string" and string.lower(FunctionExpression) or ""
+                local IsProtectedCall = not MethodCall and (FunctionLookup == "pcall" or FunctionLookup == "xpcall")
                 for Offset = 0, ResultCount - 1 do
                     local Register = A + Offset
                     local BaseName
@@ -1726,6 +1773,18 @@ local function ReconstructLinear(Proto, Strings, Options, Parsed, CaptureNames, 
                         KnownValueFlags[Register] = false
                         RegisterWritten[Register] = false
                         Declared[Register] = false
+                    elseif ActiveLocal and Register >= Proto.NumParams and IsGenericDebugName(ActiveLocal.Name) then
+                        local ExistingBase = PascalCase(ActiveLocal.Name)
+                        if ExistingBase ~= BaseName then
+                            Registers[Register] = GetFreshRegisterName(BaseName)
+                            RegisterExpressions[Register] = Registers[Register]
+                            DebugLocalNames[ActiveLocal] = Registers[Register]
+                            RegisterInline[Register] = false
+                            KnownValues[Register] = nil
+                            KnownValueFlags[Register] = false
+                            RegisterWritten[Register] = false
+                            Declared[Register] = false
+                        end
                     end
                     local WasDeclared = Declared[Register] == true
                     local ResultName = DeclareRegister(Register, PC, IndentLevel == 0)
@@ -1930,7 +1989,7 @@ local function ReconstructLinear(Proto, Strings, Options, Parsed, CaptureNames, 
 end
 local function DisassembleParsed(Parsed, SelectedProto)
     local Lines = {
-        "9faces Disassembly",
+        "Valm Decompiler Disassembly",
         "Bytecode Version: " .. tostring(Parsed.Version),
         "Type Version: " .. tostring(Parsed.TypeVersion),
         "Prototype Count: " .. tostring(#Parsed.Protos),
@@ -2021,9 +2080,9 @@ local function FindBytefall()
     end
     return nil
 end
-local Ninefaces = {
-    Name = "9faces Decompiler",
-    Version = "0.3.0-beta.22",
+local ValmDecompiler = {
+    Name = "Valm Decompiler",
+    Version = "0.3.0-beta.23",
     BytecodeVersionMin = BytecodeVersionMin,
     BytecodeVersionMax = BytecodeVersionMax,
     BytefallFallback = nil,
@@ -2036,31 +2095,31 @@ local Ninefaces = {
     Cache = Cache,
     LastOpcodeMultiplier = nil
 }
-function Ninefaces.SetBytefallFallback(Callback)
+function ValmDecompiler.SetBytefallFallback(Callback)
     if Callback ~= nil and type(Callback) ~= "function" then
         error("Bytefall fallback must be a function or nil", 2)
     end
-    Ninefaces.BytefallFallback = Callback
+    ValmDecompiler.BytefallFallback = Callback
 end
-function Ninefaces.SetBytecodeProvider(Callback)
+function ValmDecompiler.SetBytecodeProvider(Callback)
     if Callback ~= nil and type(Callback) ~= "function" then
         error("Bytecode provider must be a function or nil", 2)
     end
     ActiveBytecodeProvider = Callback or GetScriptBytecode
 end
-function Ninefaces.GetBytefallFallback()
-    return Ninefaces.BytefallFallback or FindBytefall()
+function ValmDecompiler.GetBytefallFallback()
+    return ValmDecompiler.BytefallFallback or FindBytefall()
 end
-function Ninefaces.Parse(Source)
+function ValmDecompiler.Parse(Source)
     local Bytecode = GetBytecode(Source)
     YieldCounter = 0
     local Parsed = ParseBytecode(Bytecode)
-    Ninefaces.LastOpcodeMultiplier = Parsed.OpcodeMultiplier or 1
+    ValmDecompiler.LastOpcodeMultiplier = Parsed.OpcodeMultiplier or 1
     return Parsed
 end
-function Ninefaces.Inspect(Source)
+function ValmDecompiler.Inspect(Source)
     local Success, Result = pcall(function()
-        local Parsed = Ninefaces.Parse(Source)
+        local Parsed = ValmDecompiler.Parse(Source)
         local PrototypeSummaries = {}
         for _, Proto in ipairs(Parsed.Protos) do
             PrototypeSummaries[#PrototypeSummaries + 1] = {
@@ -2083,15 +2142,15 @@ function Ninefaces.Inspect(Source)
         }
     end)
     if not Success then
-        Ninefaces.LastError = tostring(Result)
-        return nil, Ninefaces.LastError
+        ValmDecompiler.LastError = tostring(Result)
+        return nil, ValmDecompiler.LastError
     end
-    Ninefaces.LastError = nil
+    ValmDecompiler.LastError = nil
     return Result
 end
-function Ninefaces.Disassemble(Source, ProtoIndex)
+function ValmDecompiler.Disassemble(Source, ProtoIndex)
     local Success, Result = pcall(function()
-        local Parsed = Ninefaces.Parse(Source)
+        local Parsed = ValmDecompiler.Parse(Source)
         local SelectedProto
         if ProtoIndex ~= nil then
             if type(ProtoIndex) ~= "number" or ProtoIndex < 0 or ProtoIndex % 1 ~= 0 then
@@ -2105,21 +2164,21 @@ function Ninefaces.Disassemble(Source, ProtoIndex)
         return DisassembleParsed(Parsed, SelectedProto)
     end)
     if not Success then
-        Ninefaces.LastError = tostring(Result)
-        return nil, Ninefaces.LastError
+        ValmDecompiler.LastError = tostring(Result)
+        return nil, ValmDecompiler.LastError
     end
-    Ninefaces.LastError = nil
+    ValmDecompiler.LastError = nil
     return Result
 end
-function Ninefaces.Decompile(Source, Options)
+function ValmDecompiler.Decompile(Source, Options)
     if type(Options) ~= "table" then
         Options = nil
     end
     local Bytecode
     local Success, CaptureResult = pcall(GetBytecode, Source)
     if not Success then
-        Ninefaces.LastError = tostring(CaptureResult)
-        return nil, Ninefaces.LastError
+        ValmDecompiler.LastError = tostring(CaptureResult)
+        return nil, ValmDecompiler.LastError
     end
     Bytecode = CaptureResult
     local IsSourceInstance = type(typeof) == "function" and typeof(Source) == "Instance"
@@ -2134,7 +2193,7 @@ function Ninefaces.Decompile(Source, Options)
     local NativeError
     local NativeSuccess, NativeResult, NativeMessage = pcall(function()
         Parsed = ParseBytecode(Bytecode)
-        Ninefaces.LastOpcodeMultiplier = Parsed.OpcodeMultiplier or 1
+        ValmDecompiler.LastOpcodeMultiplier = Parsed.OpcodeMultiplier or 1
         return ReconstructLinear(Parsed.MainProto, Parsed.Strings, Options, Parsed, {}, 0)
     end)
     if NativeSuccess and type(NativeResult) == "string" then
@@ -2153,7 +2212,7 @@ function Ninefaces.Decompile(Source, Options)
                 Cache[Removed] = nil
             end
         end
-        Ninefaces.LastError = nil
+        ValmDecompiler.LastError = nil
         return NativeSource
     end
     local Fallback
@@ -2161,11 +2220,11 @@ function Ninefaces.Decompile(Source, Options)
     if Options and Options.SkipBytefallFallback == true then
         BytefallStatus = "Bytefall fallback is managed by the host integration"
     else
-        Fallback = Ninefaces.GetBytefallFallback()
+        Fallback = ValmDecompiler.GetBytefallFallback()
         if type(Fallback) == "function" then
             local FallbackSuccess, FallbackResult = pcall(Fallback, Source, Bytecode, Options)
             if FallbackSuccess and type(FallbackResult) == "string" and FallbackResult ~= "" then
-                Ninefaces.LastError = nil
+                ValmDecompiler.LastError = nil
                 return FallbackResult
             end
             if not FallbackSuccess then
@@ -2174,12 +2233,12 @@ function Ninefaces.Decompile(Source, Options)
                 NativeError = NativeError .. " | Bytefall returned no source"
             end
         end
-        BytefallStatus = type(Fallback) == "function" and "Bytefall failed" or "Bytefall fallback is not connected. Register the local Bytefall function with Ninefaces.SetBytefallFallback(callback)"
+        BytefallStatus = type(Fallback) == "function" and "Bytefall failed" or "Bytefall fallback is not connected. Register the local Bytefall function with ValmDecompiler.SetBytefallFallback(callback)"
     end
-    Ninefaces.LastError = tostring(NativeError or "Native reconstruction failed") .. " | " .. BytefallStatus
-    return nil, Ninefaces.LastError
+    ValmDecompiler.LastError = tostring(NativeError or "Native reconstruction failed") .. " | " .. BytefallStatus
+    return nil, ValmDecompiler.LastError
 end
-function Ninefaces.DecompileAsync(Source, Options, Callback)
+function ValmDecompiler.DecompileAsync(Source, Options, Callback)
     if type(task) ~= "table" or type(task.spawn) ~= "function" then
         return false, "task.spawn is unavailable in this executor"
     end
@@ -2187,24 +2246,24 @@ function Ninefaces.DecompileAsync(Source, Options, Callback)
         return false, "Callback must be a function or nil"
     end
     task.spawn(function()
-        local Result, ErrorMessage = Ninefaces.Decompile(Source, Options)
+        local Result, ErrorMessage = ValmDecompiler.Decompile(Source, Options)
         if Callback then
             pcall(Callback, Result, ErrorMessage)
         end
     end)
     return true
 end
-function Ninefaces.ClearCache()
+function ValmDecompiler.ClearCache()
     for Key in pairs(Cache) do
         Cache[Key] = nil
     end
     table.clear(CacheOrder)
 end
-function Ninefaces.GetStatus()
-    local Fallback = Ninefaces.GetBytefallFallback()
+function ValmDecompiler.GetStatus()
+    local Fallback = ValmDecompiler.GetBytefallFallback()
     return {
-        Name = Ninefaces.Name,
-        Version = Ninefaces.Version,
+        Name = ValmDecompiler.Name,
+        Version = ValmDecompiler.Version,
         BytecodeVersions = tostring(BytecodeVersionMin) .. "-" .. tostring(BytecodeVersionMax),
         RobloxOpcodeNormalization = true,
         RobloxOpcodeMultiplier = RobloxOpcodeMultiplier,
@@ -2218,27 +2277,31 @@ function Ninefaces.GetStatus()
     }
 end
 local function DecompileBridge(Source, Options)
-    local Result, ErrorMessage = Ninefaces.Decompile(Source, Options)
+    local Result, ErrorMessage = ValmDecompiler.Decompile(Source, Options)
     if Result == nil then
-        error("9faces: " .. tostring(ErrorMessage), 2)
+        error("Valm Decompiler: " .. tostring(ErrorMessage), 2)
     end
     return Result
 end
 local function DisassembleBridge(Source, ProtoIndex)
-    local Result, ErrorMessage = Ninefaces.Disassemble(Source, ProtoIndex)
+    local Result, ErrorMessage = ValmDecompiler.Disassemble(Source, ProtoIndex)
     if Result == nil then
-        error("9faces: " .. tostring(ErrorMessage), 2)
+        error("Valm Decompiler: " .. tostring(ErrorMessage), 2)
     end
     return Result
 end
-Env.Ninefaces = Ninefaces
+Env.ValmDecompiler = ValmDecompiler
+Env.ValmDecompilerInstalledDecompile = DecompileBridge
+Env.Ninefaces = ValmDecompiler
 Env.NinefacesInstalledDecompile = DecompileBridge
 Env.decompile = DecompileBridge
 Env.disassemble = DisassembleBridge
 if type(_G) == "table" then
-    _G.Ninefaces = Ninefaces
+    _G.ValmDecompiler = ValmDecompiler
+    _G.ValmDecompilerInstalledDecompile = DecompileBridge
+    _G.Ninefaces = ValmDecompiler
     _G.NinefacesInstalledDecompile = DecompileBridge
     _G.decompile = DecompileBridge
     _G.disassemble = DisassembleBridge
 end
-return Ninefaces
+return ValmDecompiler
