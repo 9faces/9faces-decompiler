@@ -18,6 +18,7 @@ A headless executor-side Luau bytecode reader, disassembler, and source reconstr
 - Recognizes generic compiler-generated debug names such as LocalN, Pcall, and Xpcall so they do not override stronger semantic names.
 - Removes redundant self-assignments without dropping initializers that may read an outer-scope value.
 - Inlines safe, single-use temporary values when no intervening side effects or writes make the substitution unsafe.
+- Names known `GetService`, `WaitForChild`, `FindFirstChild`, and related API results from their literal string arguments, so `game:GetService("Players")` is assigned to `Players` rather than `Game`.
 - Removes unused temporary declarations left behind after expression simplification.
 - Uses meaningful nested-prototype debug names for named closures when the compiler provides them.
 - Infers readable names for common child, ancestor, character, bounding-box, and Roblox API results.
