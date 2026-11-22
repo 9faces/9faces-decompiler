@@ -1,3 +1,11 @@
+--[[
+____   ____      .__            
+\   \ /   /____  |  |   _____   
+ \   Y   /\__  \ |  |  /     \  
+  \     /  / __ \|  |_|  Y Y  \ 
+   \___/  (____  /____/__|_|  / 
+               \/           \/  
+--]]
 local Env = (type(getgenv) == "function" and getgenv()) or _G
 local GetScriptBytecode = Env.getscriptbytecode or Env.dumpstring or getscriptbytecode or dumpstring
 local ActiveBytecodeProvider = GetScriptBytecode
@@ -30,7 +38,7 @@ for Index, Name in ipairs(OpcodeNames) do
     OpcodeLookup[Name] = Index - 1
 end
 local AuxiliaryOpcodes = {}
-for _, Name in ipairs({"GETGLOBAL", "SETGLOBAL", "GETIMPORT", "GETTABLEKS", "SETTABLEKS", "NAMECALL", "NEWTABLE", "SETLIST", "FORGLOOP", "FASTCALL3", "LOADKX", "FASTCALL2", "FASTCALL2K", "JUMPXEQKNIL", "JUMPXEQKB", "JUMPXEQKN", "JUMPXEQKS", "GETUDATAKS", "SETUDATAKS", "NAMECALLUDATA", "NEWCLASSMEMBER", "CALLFB", "CMPPROTO", "NEWCLASS", "CONSTRUCT", "GETPRIVATEFIELD", "SETPRIVATEFIELD"}) do
+for _, Name in ipairs({"GETGLOBAL", "SETGLOBAL", "GETIMPORT", "GETTABLEKS", "SETTABLEKS", "NAMECALL", "JUMPIFEQ", "JUMPIFLE", "JUMPIFLT", "JUMPIFNOTEQ", "JUMPIFNOTLE", "JUMPIFNOTLT", "NEWTABLE", "SETLIST", "FORGLOOP", "FASTCALL3", "LOADKX", "FASTCALL2", "FASTCALL2K", "JUMPXEQKNIL", "JUMPXEQKB", "JUMPXEQKN", "JUMPXEQKS", "GETUDATAKS", "SETUDATAKS", "NAMECALLUDATA", "NEWCLASSMEMBER", "CALLFB", "CMPPROTO", "NEWCLASS", "CONSTRUCT", "GETPRIVATEFIELD", "SETPRIVATEFIELD"}) do
     AuxiliaryOpcodes[OpcodeLookup[Name]] = true
 end
 local ControlFlowOpcodes = {}
@@ -1592,7 +1600,7 @@ local function FindBytefall()
 end
 local Ninefaces = {
     Name = "9faces Decompiler",
-    Version = "0.3.0-beta.8",
+    Version = "0.3.0-beta.9",
     BytecodeVersionMin = BytecodeVersionMin,
     BytecodeVersionMax = BytecodeVersionMax,
     BytefallFallback = nil,
