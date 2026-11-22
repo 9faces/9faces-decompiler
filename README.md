@@ -5,19 +5,18 @@ A headless executor-side Luau bytecode reader, disassembler, and source reconstr
 ## Native reconstruction
 
 - Reads Luau bytecode versions 3 through 14.
-- Automatically detects and normalizes Roblox production opcode bytes before decoding. Standard unencoded Luau bytecode is left unchanged.
+- Normalizes Roblox production opcode bytes before decoding while preserving standard unencoded Luau bytecode.
 - Reconstructs common branches, if/else blocks, while loops, repeat loops, numeric for loops, and generic for loops.
-- Reconstructs nested closures, captured upvalues, varargs, and table construction.
+- Reconstructs nested closures and consumes capture records after both NEWCLOSURE and DUPCLOSURE.
+- Reconstructs captured locals and upvalues, varargs, and common table construction.
 - Decodes one-, two-, and three-part GETIMPORT paths in Luau order.
 - Accepts an explicit executor bytecode provider through `Ninefaces.SetBytecodeProvider`.
 - Tracks register values and scopes across reconstructed blocks.
-- Folds safe constant arithmetic and selected deterministic string, math, and bit32 calls.
 - Supports PascalCase output names by default.
-- Includes the requested 9faces ASCII banner at the beginning of `Loader.lua`.
 
 ## Valm Dex ++
 
-Valm Dex ++ loads this module as its primary decompiler and passes the selected script's bytecode directly to 9faces. Bytefall remains the first fallback only when native reconstruction returns no source.
+Valm Dex ++ loads this module as its primary decompiler and passes the selected script's bytecode directly to 9faces. Bytefall remains the first fallback when native reconstruction returns no source. Valm Dex adds the 9faces banner to successfully decompiled output, not to the loader source or the decompiler UI.
 
 ## Limits
 
