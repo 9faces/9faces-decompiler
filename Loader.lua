@@ -662,6 +662,7 @@ local function ReconstructLinear(Proto, Strings, Options, Parsed, CaptureNames, 
     local RegisterExpressions = {}
     local KnownValues = {}
     local KnownValueFlags = {}
+    local RegisterWritten = {}
     local HighestRegister = Proto.NumParams - 1
     local MultiValue = nil
     local MultiValueStart = nil
@@ -672,6 +673,7 @@ local function ReconstructLinear(Proto, Strings, Options, Parsed, CaptureNames, 
         Registers[Register] = Name
         RegisterExpressions[Register] = Name
         Declared[Register] = true
+        RegisterWritten[Register] = true
         HighestRegister = math.max(HighestRegister, Register)
     end
     local function GetReg(Register, PC)
@@ -701,6 +703,57 @@ local function ReconstructLinear(Proto, Strings, Options, Parsed, CaptureNames, 
         end
         return nil
     end
+    local function IsGenericDebugName(Name)
+        local Lower = string.lower(tostring(Name or ""))
+        return Lower == "variable"
+            or Lower == "callback"
+            or Lower == "instance"
+            or Lower:match("^arg%d+$") ~= nil
+            or Lower:match("^local%d+$") ~= nil
+            or Lower:match("^var%d+$") ~= nil
+            or Lower:match("^v%d+$") ~= nil
+            or Lower:match("^temp%d+$") ~= nil
+            or Lower:match("^tmp%d+$") ~= nil
+    end
+    local function InferRegisterName(Expression, Register)
+        local ServiceName = Expression:match('GetService%s*%(%s*"([^"]+)"')
+        if ServiceName and ServiceName ~= "" then
+            return PascalCase(ServiceName)
+        end
+        local ClassName = Expression:match('Instance%.new%s*%(%s*"([^"]+)"')
+        if ClassName and ClassName ~= "" then
+            return PascalCase(ClassName)
+        end
+        local ChildName = Expression:match('WaitForChild%s*%(%s*"([^"]+)"')
+            or Expression:match('FindFirstChild%s*%(%s*"([^"]+)"')
+        if ChildName and ChildName ~= "" then
+            return PascalCase(ChildName)
+        end
+        if Expression == "game" then
+            return "Game"
+        elseif Expression == "workspace" then
+            return "Workspace"
+        elseif Expression == "script" then
+            return "Script"
+        elseif Expression:match("^function[%s%(]") then
+            return "Callback"
+        elseif Expression == "..." then
+            return "Arguments"
+        end
+        local EnumItem = Expression:match("^Enum%.[%w_]+%.([%w_]+)$")
+        if EnumItem then
+            return PascalCase(EnumItem)
+        end
+        local Property = Expression:match("%.([%a_][%w_]*)$")
+        if Property and Property ~= "new" then
+            return PascalCase(Property)
+        end
+        local Identifier = Expression:match("^([%a_][%w_]*)$")
+        if Identifier then
+            return PascalCase(Identifier)
+        end
+        return "Local" .. tostring(Register + 1)
+    end
     local function DeclareRegister(Register, PC)
         local Name = Registers[Register]
         if not Name then
@@ -717,6 +770,19 @@ local function ReconstructLinear(Proto, Strings, Options, Parsed, CaptureNames, 
         return Name
     end
     local function WriteReg(Register, Expression, PC, KnownValue, IsKnown, ExpressionValue)
+        local ExistingName = Registers[Register]
+        if not RegisterWritten[Register] and not Declared[Register] and IsGenericDebugName(ExistingName) then
+            local BaseName = InferRegisterName(ExpressionValue or Expression, Register)
+            local Name = BaseName
+            local Suffix = 2
+            while UsedNames[Name] do
+                Name = BaseName .. tostring(Suffix)
+                Suffix = Suffix + 1
+            end
+            UsedNames[Name] = true
+            Registers[Register] = Name
+        end
+        RegisterWritten[Register] = true
         local Name = DeclareRegister(Register, PC)
         HighestRegister = math.max(HighestRegister, Register)
         RegisterExpressions[Register] = ExpressionValue or Expression
@@ -1643,7 +1709,7 @@ local function FindBytefall()
 end
 local Ninefaces = {
     Name = "9faces Decompiler",
-    Version = "0.3.0-beta.11",
+    Version = "0.3.0-beta.12",
     BytecodeVersionMin = BytecodeVersionMin,
     BytecodeVersionMax = BytecodeVersionMax,
     BytefallFallback = nil,
@@ -1829,7 +1895,8 @@ function Ninefaces.GetStatus()
         RobloxOpcodeNormalization = true,
         RobloxOpcodeMultiplier = RobloxOpcodeMultiplier,
         BytefallConnected = type(Fallback) == "function",
-        NativeDecompiler = "Structured branches, nested closures, varargs, table reconstruction, register scope recovery, and constant folding",
+        NativeDecompiler = "Structured branches, nested closures, varargs, semantic Roblox local naming, table reconstruction, register scope recovery, and constant folding",
+        SemanticLocalNaming = true,
         Disassembler = "Luau bytecode versions 3 through 14",
         CooperativeYield = type(task) == "table" and type(task.wait) == "function",
         UserInterface = false,
