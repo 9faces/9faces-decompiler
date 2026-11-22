@@ -14,6 +14,7 @@ A headless executor-side Luau bytecode reader, disassembler, and source reconstr
 - Tracks register values and scopes across reconstructed blocks.
 - Infers readable local names from debug-local lifetimes, Roblox services, child lookups, indexed properties, common method results, and protected-call results.
 - Recognizes generic compiler-generated debug names such as LocalN, Pcall, and Xpcall so they do not override stronger semantic names.
+- Removes redundant self-assignments without dropping initializers that may read an outer-scope value.
 - Uses PascalCase output names by default.
 - Exposes parsing, inspection, disassembly, synchronous decompilation, asynchronous decompilation, and cache controls.
 
