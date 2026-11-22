@@ -943,6 +943,16 @@ local function ReconstructLinear(Proto, Strings, Options, Parsed, CaptureNames, 
         EmitLine(Name .. " = " .. Expression)
         return Name
     end
+    local function InvalidateRegister(Register, Name)
+        RegisterInline[Register] = false
+        KnownValueFlags[Register] = false
+        KnownValues[Register] = nil
+        RegisterWritten[Register] = true
+        if Name then
+            Registers[Register] = Name
+            RegisterExpressions[Register] = Name
+        end
+    end
     local function GetConstantKnown(Constant)
         if Constant.Kind == "Nil" then
             return nil, true
@@ -1259,6 +1269,10 @@ local function ReconstructLinear(Proto, Strings, Options, Parsed, CaptureNames, 
                 local VariableName = Registers[A + 3] or GetDebugLocalName(Proto, A + 3, Instructions[InstructionIndex].PC, UsedNames, UsePascalCase)
                 Registers[A + 3] = VariableName
                 Declared[A + 3] = true
+                InvalidateRegister(A)
+                InvalidateRegister(A + 1)
+                InvalidateRegister(A + 2)
+                InvalidateRegister(A + 3, VariableName)
                 EmitLine("for " .. VariableName .. " = " .. GetReg(A + 2) .. ", " .. GetReg(A) .. ", " .. GetReg(A + 1) .. " do")
             else
                 local VariableCount = ForLoop.VariableCount
@@ -1270,8 +1284,12 @@ local function ReconstructLinear(Proto, Strings, Options, Parsed, CaptureNames, 
                     local VariableName = Registers[Register] or GetDebugLocalName(Proto, Register, Instructions[InstructionIndex].PC, UsedNames, UsePascalCase)
                     Registers[Register] = VariableName
                     Declared[Register] = true
+                    InvalidateRegister(Register, VariableName)
                     Variables[#Variables + 1] = VariableName
                 end
+                InvalidateRegister(A)
+                InvalidateRegister(A + 1)
+                InvalidateRegister(A + 2)
                 EmitLine("for " .. table.concat(Variables, ", ") .. " in " .. GetReg(A) .. ", " .. GetReg(A + 1) .. ", " .. GetReg(A + 2) .. " do")
             end
             IndentLevel = IndentLevel + 1
@@ -1513,6 +1531,8 @@ local function ReconstructLinear(Proto, Strings, Options, Parsed, CaptureNames, 
                 return nil, Name .. " does not reference a string method name"
             end
             NameCalls[A] = {Receiver = GetReg(B), Method = MethodConstant.Value}
+            InvalidateRegister(A)
+            InvalidateRegister(A + 1)
         elseif Name == "CALL" or Name == "CALLFB" then
             local MethodCall = NameCalls[A]
             local FirstArgument = A + (MethodCall and 2 or 1)
@@ -1568,6 +1588,7 @@ local function ReconstructLinear(Proto, Strings, Options, Parsed, CaptureNames, 
                 MultiValue = Call
                 MultiValueStart = A
                 HighestRegister = math.max(HighestRegister, A)
+                InvalidateRegister(A)
             elseif ResultCount == 0 then
                 EmitLine(Call)
                 MultiValue = nil
@@ -1587,6 +1608,7 @@ local function ReconstructLinear(Proto, Strings, Options, Parsed, CaptureNames, 
                 for Register = A, A + ResultCount - 1 do
                     local ResultName = DeclareRegister(Register, PC)
                     HighestRegister = math.max(HighestRegister, Register)
+                    InvalidateRegister(Register, ResultName)
                     ResultNames[#ResultNames + 1] = ResultName
                 end
                 EmitLine(table.concat(ResultNames, ", ") .. " = " .. Call)
@@ -1626,6 +1648,7 @@ local function ReconstructLinear(Proto, Strings, Options, Parsed, CaptureNames, 
                 MultiValue = "..."
                 MultiValueStart = A
                 HighestRegister = math.max(HighestRegister, A)
+                InvalidateRegister(A)
             else
                 if B <= 1 then
                     return nil, "GETVARARGS has an invalid fixed result count"
@@ -1635,6 +1658,7 @@ local function ReconstructLinear(Proto, Strings, Options, Parsed, CaptureNames, 
                 local VarargName = DeclareRegister(Register, PC)
                 VarargNames[#VarargNames + 1] = VarargName
                 HighestRegister = math.max(HighestRegister, Register)
+                InvalidateRegister(Register, VarargName)
             end
             EmitLine(table.concat(VarargNames, ", ") .. " = ...")
             end
@@ -1858,7 +1882,7 @@ local function FindBytefall()
 end
 local Ninefaces = {
     Name = "9faces Decompiler",
-    Version = "0.3.0-beta.15",
+    Version = "0.3.0-beta.16",
     BytecodeVersionMin = BytecodeVersionMin,
     BytecodeVersionMax = BytecodeVersionMax,
     BytefallFallback = nil,
