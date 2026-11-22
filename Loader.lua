@@ -1,5 +1,6 @@
 local Env = (type(getgenv) == "function" and getgenv()) or _G
 local GetScriptBytecode = Env.getscriptbytecode or Env.dumpstring or getscriptbytecode or dumpstring
+local ActiveBytecodeProvider = GetScriptBytecode
 local Cache = setmetatable({}, {__mode = "k"})
 local CacheOrder = {}
 local CacheLimit = 24
@@ -530,7 +531,7 @@ local function ConstantExpression(Proto, Index, Strings)
         local Import = Constant.Value
         local Length = math.floor(Import / 1073741824) % 4
         local Parts = {}
-        local Masks = {Import % 1024, math.floor(Import / 1024) % 1024, math.floor(Import / 1048576) % 1024}
+        local Masks = {math.floor(Import / 1048576) % 1024, math.floor(Import / 1024) % 1024, Import % 1024}
         if Length < 1 or Length > 3 then
             error("Import constant has an invalid path length", 0)
         end
@@ -1210,7 +1211,35 @@ local function ReconstructLinear(Proto, Strings, Options, Parsed, CaptureNames, 
         elseif Name == "DUPTABLE" then
             WriteReg(A, ConstantExpression(Proto, Instruction.D, Strings), PC)
         elseif Name == "GETIMPORT" then
-            local Expression = ConstantExpression(Proto, Instruction.D, Strings)
+            local Import = Aux or 0
+            local Length = math.floor(Import / 1073741824) % 4
+            if Length < 1 or Length > 3 then
+                return nil, "GETIMPORT contains an invalid import path"
+            end
+            local ImportIndices = {math.floor(Import / 1048576) % 1024, math.floor(Import / 1024) % 1024, Import % 1024}
+            local ImportParts = {}
+            for ImportIndex = 1, Length do
+                local ImportConstant = GetConstant(Proto, ImportIndices[ImportIndex])
+                if ImportConstant.Kind ~= "String" then
+                    return nil, "GETIMPORT path references a non-string constant"
+                end
+                local ImportPart = ImportConstant.Value
+                if IsIdentifier(ImportPart) then
+                    ImportParts[#ImportParts + 1] = ImportPart
+                elseif ImportIndex == 1 then
+                    ImportParts[#ImportParts + 1] = "_G[" .. Quote(ImportPart) .. "]"
+                else
+                    ImportParts[#ImportParts + 1] = "[" .. Quote(ImportPart) .. "]"
+                end
+            end
+            local Expression = ImportParts[1]
+            for ImportIndex = 2, #ImportParts do
+                if ImportParts[ImportIndex]:sub(1, 1) == "[" then
+                    Expression = Expression .. ImportParts[ImportIndex]
+                else
+                    Expression = Expression .. "." .. ImportParts[ImportIndex]
+                end
+            end
             WriteReg(A, Expression, PC, nil, false, Expression)
         elseif Name == "NAMECALL" or Name == "NAMECALLUDATA" then
             local ConstantIndex = Name == "NAMECALLUDATA" and (Aux % 65536) or Aux
@@ -1501,10 +1530,11 @@ local function GetBytecode(Source)
     if type(Source) == "string" then
         return Source
     end
-    if type(GetScriptBytecode) ~= "function" then
+    local Provider = ActiveBytecodeProvider or GetScriptBytecode
+    if type(Provider) ~= "function" then
         error("This executor does not expose getscriptbytecode or dumpstring", 0)
     end
-    local Success, Result = pcall(GetScriptBytecode, Source)
+    local Success, Result = pcall(Provider, Source)
     if not Success then
         error("Bytecode capture failed: " .. tostring(Result), 0)
     end
@@ -1562,7 +1592,7 @@ local function FindBytefall()
 end
 local Ninefaces = {
     Name = "9faces Decompiler",
-    Version = "0.3.0-beta.7",
+    Version = "0.3.0-beta.8",
     BytecodeVersionMin = BytecodeVersionMin,
     BytecodeVersionMax = BytecodeVersionMax,
     BytefallFallback = nil,
@@ -1579,6 +1609,12 @@ function Ninefaces.SetBytefallFallback(Callback)
         error("Bytefall fallback must be a function or nil", 2)
     end
     Ninefaces.BytefallFallback = Callback
+end
+function Ninefaces.SetBytecodeProvider(Callback)
+    if Callback ~= nil and type(Callback) ~= "function" then
+        error("Bytecode provider must be a function or nil", 2)
+    end
+    ActiveBytecodeProvider = Callback or GetScriptBytecode
 end
 function Ninefaces.GetBytefallFallback()
     return Ninefaces.BytefallFallback or FindBytefall()
