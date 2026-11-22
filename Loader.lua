@@ -779,7 +779,7 @@ local function ReconstructLinear(Proto, Strings, Options, Parsed, CaptureNames, 
     local RegisterDebugLocals = {}
     local DebugLocalNames = {}
     local function GetFreshRegisterName(BaseName)
-        local Base = PascalCase(BaseName)
+        local Base = UsePascalCase and PascalCase(BaseName) or (IsIdentifier(BaseName) and BaseName or PascalCase(BaseName))
         local Name = Base
         local Suffix = 2
         while UsedNames[Name] do
@@ -1699,7 +1699,6 @@ local function ReconstructLinear(Proto, Strings, Options, Parsed, CaptureNames, 
             elseif ResultCount <= 16 then
                 local ResultNames = {}
                 local ResultWasDeclared = {}
-                local ResultBases = {}
                 local IsProtectedCall = not MethodCall and (FunctionExpression == "pcall" or FunctionExpression == "xpcall")
                 for Offset = 0, ResultCount - 1 do
                     local Register = A + Offset
@@ -1736,7 +1735,6 @@ local function ReconstructLinear(Proto, Strings, Options, Parsed, CaptureNames, 
                     HighestRegister = math.max(HighestRegister, Register)
                     ResultNames[#ResultNames + 1] = ResultName
                     ResultWasDeclared[#ResultWasDeclared + 1] = WasDeclared
-                    ResultBases[#ResultBases + 1] = ResultName
                 end
                 local CanDeclareAllLocally = IndentLevel == 0
                 for _, WasDeclared in ipairs(ResultWasDeclared) do
@@ -2025,7 +2023,7 @@ local function FindBytefall()
 end
 local Ninefaces = {
     Name = "9faces Decompiler",
-    Version = "0.3.0-beta.21",
+    Version = "0.3.0-beta.22",
     BytecodeVersionMin = BytecodeVersionMin,
     BytecodeVersionMax = BytecodeVersionMax,
     BytefallFallback = nil,
