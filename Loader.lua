@@ -1,4 +1,4 @@
--- TEST
+-- VALM
 
 local Env = (type(getgenv) == "function" and getgenv()) or _G
 local GetScriptBytecode = Env.getscriptbytecode or Env.dumpstring or getscriptbytecode or dumpstring
