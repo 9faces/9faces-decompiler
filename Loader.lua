@@ -639,6 +639,306 @@ local function GetDebugLocalName(Proto, Register, PC, UsedNames, UsePascalCase)
     UsedNames[Name] = true
     return Name
 end
+local function IsSimpleTemporaryValue(Value)
+    local Text = tostring(Value or ""):match("^%s*(.-)%s*$")
+    if Text == "" or Text == "nil" or Text == "true" or Text == "false" then
+        return Text ~= ""
+    end
+    if Text:match("^[%a_][%w_]*(%.[%a_][%w_]*)*$") then
+        return true
+    end
+    if Text:match("^0[xX][%da-fA-F]+$") or Text:match("^[%+%-]?%d+%.?%d*[eE]?[%+%-]?%d*$") or Text:match("^[%+%-]?%.%d+[eE]?[%+%-]?%d*$") then
+        return tonumber(Text) ~= nil
+    end
+    local QuoteCharacter = Text:sub(1, 1)
+    if QuoteCharacter ~= "\"" and QuoteCharacter ~= "'" then
+        return false
+    end
+    local Index = 2
+    while Index <= #Text do
+        local Character = Text:sub(Index, Index)
+        if Character == "\\" then
+            Index = Index + 2
+        elseif Character == QuoteCharacter then
+            return Index == #Text
+        else
+            Index = Index + 1
+        end
+    end
+    return false
+end
+local function GetAssignmentParts(Line)
+    local Indentation = Line:match("^(%s*)") or ""
+    local Body = Line:sub(#Indentation + 1)
+    local Left, Right = Body:match("^([^=]+)%s*=%s*(.-)%s*$")
+    if not Left then
+        return nil
+    end
+    Left = Left:match("^%s*(.-)%s*$")
+    if Left:match("^local%s") or Left:match("^function%s") then
+        return nil
+    end
+    local Names = {}
+    for Name in Left:gmatch("[%a_][%w_]*") do
+        Names[#Names + 1] = Name
+    end
+    if #Names == 0 then
+        return nil
+    end
+    if Left:gsub("%s+", "") ~= table.concat(Names, ",") then
+        return nil
+    end
+    return {
+        Indentation = Indentation,
+        Left = Left,
+        Right = Right,
+        Names = Names
+    }
+end
+local function CountCodeIdentifier(Line, TargetName)
+    local Count = 0
+    local Index = 1
+    while Index <= #Line do
+        local Character = Line:sub(Index, Index)
+        if Character == "\"" or Character == "'" then
+            local QuoteCharacter = Character
+            Index = Index + 1
+            while Index <= #Line do
+                Character = Line:sub(Index, Index)
+                if Character == "\\" then
+                    Index = Index + 2
+                elseif Character == QuoteCharacter then
+                    Index = Index + 1
+                    break
+                else
+                    Index = Index + 1
+                end
+            end
+        elseif Character == "-" and Line:sub(Index + 1, Index + 1) == "-" then
+            break
+        elseif Character:match("[%a_]") then
+            local StartIndex = Index
+            Index = Index + 1
+            while Index <= #Line and Line:sub(Index, Index):match("[%w_]") do
+                Index = Index + 1
+            end
+            if Line:sub(StartIndex, Index - 1) == TargetName then
+                Count = Count + 1
+            end
+        else
+            Index = Index + 1
+        end
+    end
+    return Count
+end
+local function ReplaceCodeIdentifier(Line, TargetName, Replacement)
+    local Output = {}
+    local Index = 1
+    while Index <= #Line do
+        local Character = Line:sub(Index, Index)
+        if Character == "\"" or Character == "'" then
+            local StartIndex = Index
+            local QuoteCharacter = Character
+            Index = Index + 1
+            while Index <= #Line do
+                Character = Line:sub(Index, Index)
+                if Character == "\\" then
+                    Index = Index + 2
+                elseif Character == QuoteCharacter then
+                    Index = Index + 1
+                    break
+                else
+                    Index = Index + 1
+                end
+            end
+            Output[#Output + 1] = Line:sub(StartIndex, Index - 1)
+        elseif Character == "-" and Line:sub(Index + 1, Index + 1) == "-" then
+            Output[#Output + 1] = Line:sub(Index)
+            break
+        elseif Character:match("[%a_]") then
+            local StartIndex = Index
+            Index = Index + 1
+            while Index <= #Line and Line:sub(Index, Index):match("[%w_]") do
+                Index = Index + 1
+            end
+            local Identifier = Line:sub(StartIndex, Index - 1)
+            Output[#Output + 1] = Identifier == TargetName and Replacement or Identifier
+        else
+            Output[#Output + 1] = Character
+            Index = Index + 1
+        end
+    end
+    return table.concat(Output)
+end
+local function GetExpressionIdentifiers(Expression)
+    local Identifiers = {}
+    local Index = 1
+    while Index <= #Expression do
+        local Character = Expression:sub(Index, Index)
+        if Character == "\"" or Character == "'" then
+            local QuoteCharacter = Character
+            Index = Index + 1
+            while Index <= #Expression do
+                Character = Expression:sub(Index, Index)
+                if Character == "\\" then
+                    Index = Index + 2
+                elseif Character == QuoteCharacter then
+                    Index = Index + 1
+                    break
+                else
+                    Index = Index + 1
+                end
+            end
+        elseif Character:match("[%a_]") then
+            local StartIndex = Index
+            Index = Index + 1
+            while Index <= #Expression and Expression:sub(Index, Index):match("[%w_]") do
+                Index = Index + 1
+            end
+            Identifiers[Expression:sub(StartIndex, Index - 1)] = true
+        else
+            Index = Index + 1
+        end
+    end
+    return Identifiers
+end
+local function TryInlineTemporary(Lines, SourceIndex)
+    local SourceAssignment = GetAssignmentParts(Lines[SourceIndex])
+    if not SourceAssignment or #SourceAssignment.Names ~= 1 or not IsSimpleTemporaryValue(SourceAssignment.Right) then
+        return false
+    end
+    local TargetName = SourceAssignment.Names[1]
+    if SourceAssignment.Right == TargetName then
+        return false
+    end
+    local Dependencies = GetExpressionIdentifiers(SourceAssignment.Right)
+    local SearchLimit = math.min(#Lines, SourceIndex + 96)
+    for TargetIndex = SourceIndex + 1, SearchLimit do
+        local TargetLine = Lines[TargetIndex]
+        if TargetLine == "" or TargetLine:match("^%s*%-%-") then
+            continue
+        end
+        local TargetIndentation = TargetLine:match("^(%s*)") or ""
+        if TargetIndentation ~= SourceAssignment.Indentation then
+            break
+        end
+        local TargetAssignment = GetAssignmentParts(TargetLine)
+        if TargetAssignment then
+            local RightUses = CountCodeIdentifier(TargetAssignment.Right, TargetName)
+            local WritesTarget = false
+            for _, Name in ipairs(TargetAssignment.Names) do
+                if Name == TargetName then
+                    WritesTarget = true
+                    break
+                end
+            end
+            if WritesTarget then
+                if RightUses == 1 then
+                    Lines[TargetIndex] = TargetAssignment.Indentation .. TargetAssignment.Left .. " = " .. ReplaceCodeIdentifier(TargetAssignment.Right, TargetName, SourceAssignment.Right)
+                    table.remove(Lines, SourceIndex)
+                    return true
+                end
+                return false
+            end
+            if RightUses > 0 then
+                if RightUses == 1 then
+                    Lines[TargetIndex] = TargetAssignment.Indentation .. TargetAssignment.Left .. " = " .. ReplaceCodeIdentifier(TargetAssignment.Right, TargetName, SourceAssignment.Right)
+                    table.remove(Lines, SourceIndex)
+                    return true
+                end
+                return false
+            end
+            if not IsSimpleTemporaryValue(TargetAssignment.Right) then
+                return false
+            end
+            for _, Name in ipairs(TargetAssignment.Names) do
+                if Dependencies[Name] then
+                    return false
+                end
+            end
+        else
+            local Uses = CountCodeIdentifier(TargetLine, TargetName)
+            if Uses == 1 then
+                Lines[TargetIndex] = ReplaceCodeIdentifier(TargetLine, TargetName, SourceAssignment.Right)
+                table.remove(Lines, SourceIndex)
+                return true
+            end
+            return false
+        end
+    end
+    return false
+end
+local function RemoveUnusedLocalNames(Lines)
+    local Index = 1
+    while Index <= #Lines do
+        local Indentation, Declaration = Lines[Index]:match("^(%s*)local%s+(.+)$")
+        if not Declaration or Declaration:find("=", 1, true) or Declaration:find("function", 1, true) then
+            Index = Index + 1
+            continue
+        end
+        local Names = {}
+        for Name in Declaration:gmatch("[^,]+") do
+            Name = Name:match("^%s*(.-)%s*$")
+            if not Name:match("^[%a_][%w_]*$") then
+                Names = {}
+                break
+            end
+            Names[#Names + 1] = Name
+        end
+        if #Names == 0 then
+            Index = Index + 1
+            continue
+        end
+        local KeptNames = {}
+        for _, Name in ipairs(Names) do
+            local References = 0
+            for _, Line in ipairs(Lines) do
+                References = References + CountCodeIdentifier(Line, Name)
+                if References > 1 then
+                    break
+                end
+            end
+            if References > 1 then
+                KeptNames[#KeptNames + 1] = Name
+            end
+        end
+        if #KeptNames == #Names then
+            Index = Index + 1
+        elseif #KeptNames == 0 then
+            table.remove(Lines, Index)
+        else
+            Lines[Index] = Indentation .. "local " .. table.concat(KeptNames, ", ")
+            Index = Index + 1
+        end
+    end
+end
+local function OptimizeTemporaryAssignments(Source)
+    local Lines = {}
+    for Line in (tostring(Source or "") .. "\n"):gmatch("(.-)\n") do
+        Lines[#Lines + 1] = Line
+    end
+    local Index = 1
+    local OptimizationCount = 0
+    while Index <= #Lines do
+        if TryInlineTemporary(Lines, Index) then
+            OptimizationCount = OptimizationCount + 1
+        else
+            Index = Index + 1
+        end
+    end
+    RemoveUnusedLocalNames(Lines)
+    local CleanLines = {}
+    for _, Line in ipairs(Lines) do
+        if Line ~= "" or #CleanLines == 0 or CleanLines[#CleanLines] ~= "" then
+            CleanLines[#CleanLines + 1] = Line
+        end
+    end
+    while #CleanLines > 0 and CleanLines[#CleanLines] == "" do
+        table.remove(CleanLines)
+    end
+    return table.concat(CleanLines, "\n")
+end
+
 local function ReconstructLinear(Proto, Strings, Options, Parsed, CaptureNames, Depth)
     local UsePascalCase = not Options or Options.PascalCase ~= false
     local CurrentDepth = Depth or 0
@@ -2036,7 +2336,7 @@ local function ReconstructLinear(Proto, Strings, Options, Parsed, CaptureNames, 
     if not HasReturn and #OutputLines == 0 then
         return ""
     end
-    return table.concat(OutputLines, "\n")
+    return OptimizeTemporaryAssignments(table.concat(OutputLines, "\n"))
 end
 local function DisassembleParsed(Parsed, SelectedProto)
     local Lines = {
@@ -2133,7 +2433,7 @@ local function FindBytefall()
 end
 local ValmDecompiler = {
     Name = "Valm Decompiler",
-    Version = "0.3.0-beta.26",
+    Version = "0.3.0-beta.27",
     BytecodeVersionMin = BytecodeVersionMin,
     BytecodeVersionMax = BytecodeVersionMax,
     BytefallFallback = nil,
