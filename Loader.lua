@@ -651,7 +651,18 @@ local function ReconstructLinear(Proto, Strings, Options, Parsed, CaptureNames, 
     local CurrentPC = 0
     local ActiveInstructionIndex = 1
     local function EmitLine(Value)
-        Lines[#Lines + 1] = string.rep("    ", IndentLevel) .. tostring(Value)
+        local Text = string.rep("    ", IndentLevel) .. tostring(Value)
+        local IsSectionStart = IndentLevel == 0 and (
+            Text:match("^local function[%s]") ~= nil
+            or Text:match("^function[%s]") ~= nil
+            or Text:match("^local [%a_][%w_]*%s*=%s*function[%s%(]") ~= nil
+            or Text:match("^[%a_][%w_]*%s*=%s*function[%s%(]") ~= nil
+            or Text:match("^return[%s$]") ~= nil
+        )
+        if IsSectionStart and #Lines > 0 and Lines[#Lines] ~= "" then
+            Lines[#Lines + 1] = ""
+        end
+        Lines[#Lines + 1] = Text
     end
     local RegisterReads = {}
     local RegisterWrites = {}
@@ -903,11 +914,17 @@ local function ReconstructLinear(Proto, Strings, Options, Parsed, CaptureNames, 
         GetChildren = "Children",
         GetDescendants = "Descendants",
         GetPlayers = "Players",
+        GetPlayerFromCharacter = "Player",
+        GetCharacterFromPlayer = "Character",
+        GetHumanoid = "Humanoid",
+        GetRootPart = "RootPart",
         GetAttributes = "Attributes",
         GetAttribute = "Attribute",
+        GetAttributeChangedSignal = "AttributeChangedSignal",
         GetFullName = "FullName",
         GetName = "Name",
         GetPivot = "Pivot",
+        GetPrimaryPartCFrame = "PrimaryPartCFrame",
         GetDebugId = "DebugId",
         GetMouse = "Mouse",
         GetMouseLocation = "MouseLocation",
@@ -915,7 +932,14 @@ local function ReconstructLinear(Proto, Strings, Options, Parsed, CaptureNames, 
         GetUserThumbnailAsync = "Thumbnail",
         GetUserIdFromNameAsync = "UserId",
         GetNameFromUserIdAsync = "Username",
+        GetRankInGroup = "Rank",
+        GetRoleInGroup = "Role",
+        GetGroupInfoAsync = "GroupInfo",
+        GetJoinData = "JoinData",
+        GetTagged = "TaggedInstances",
+        GetTags = "Tags",
         GetPropertyChangedSignal = "PropertyChangedSignal",
+        FindFirstAncestor = "Ancestor",
         GetAsync = "Response",
         PostAsync = "Response",
         HttpGet = "Response",
@@ -927,6 +951,18 @@ local function ReconstructLinear(Proto, Strings, Options, Parsed, CaptureNames, 
         Clone = "Clone"
     }
     local function InferRegisterName(Expression, Register)
+        local AttributeName = Expression:match('GetAttribute%s*%(%s*"([^"]+)"')
+        if AttributeName and AttributeName ~= "" then
+            return PascalCase(AttributeName)
+        end
+        local AttributeSignalName = Expression:match('GetAttributeChangedSignal%s*%(%s*"([^"]+)"')
+        if AttributeSignalName and AttributeSignalName ~= "" then
+            return PascalCase(AttributeSignalName) .. "Changed"
+        end
+        local PropertySignalName = Expression:match('GetPropertyChangedSignal%s*%(%s*"([^"]+)"')
+        if PropertySignalName and PropertySignalName ~= "" then
+            return PascalCase(PropertySignalName) .. "Changed"
+        end
         local ServiceName = Expression:match('GetService%s*%(%s*"([^"]+)"')
         if ServiceName and ServiceName ~= "" then
             return PascalCase(ServiceName)
@@ -1132,6 +1168,8 @@ local function ReconstructLinear(Proto, Strings, Options, Parsed, CaptureNames, 
             ["string.sub"] = StringLibrary and StringLibrary.sub,
             ["string.rep"] = StringLibrary and StringLibrary.rep,
             ["string.byte"] = StringLibrary and StringLibrary.byte,
+            ["string.format"] = StringLibrary and StringLibrary.format,
+            ["string.match"] = StringLibrary and StringLibrary.match,
             ["tonumber"] = tonumber,
             ["tostring"] = tostring,
             ["math.abs"] = MathLibrary and MathLibrary.abs,
@@ -1146,6 +1184,8 @@ local function ReconstructLinear(Proto, Strings, Options, Parsed, CaptureNames, 
             ["math.exp"] = MathLibrary and MathLibrary.exp,
             ["math.log"] = MathLibrary and MathLibrary.log,
             ["math.fmod"] = MathLibrary and MathLibrary.fmod,
+            ["math.clamp"] = MathLibrary and MathLibrary.clamp,
+            ["math.sign"] = MathLibrary and MathLibrary.sign,
             ["bit32.band"] = BitLibrary and BitLibrary.band,
             ["bit32.bor"] = BitLibrary and BitLibrary.bor,
             ["bit32.bxor"] = BitLibrary and BitLibrary.bxor,
@@ -1162,6 +1202,10 @@ local function ReconstructLinear(Proto, Strings, Options, Parsed, CaptureNames, 
             local RepeatCount = tonumber(Arguments[2]) or 0
             local InputLength = type(Arguments[1]) == "string" and #Arguments[1] or 0
             if RepeatCount < 0 or RepeatCount > 4096 or InputLength * RepeatCount > 65536 then
+                return false, nil
+            end
+        elseif FunctionExpression == "string.format" then
+            if type(Arguments[1]) ~= "string" or #Arguments[1] > 4096 then
                 return false, nil
             end
         end
@@ -1981,6 +2025,9 @@ local function ReconstructLinear(Proto, Strings, Options, Parsed, CaptureNames, 
             end
             OutputLines[#OutputLines + 1] = "local " .. table.concat(DeclarationGroup, ", ")
         end
+        if #Lines > 0 then
+            OutputLines[#OutputLines + 1] = ""
+        end
     end
     for _, Line in ipairs(Lines) do
         OutputLines[#OutputLines + 1] = Line
@@ -2085,7 +2132,7 @@ local function FindBytefall()
 end
 local ValmDecompiler = {
     Name = "Valm Decompiler",
-    Version = "0.3.0-beta.25",
+    Version = "0.3.0-beta.26",
     BytecodeVersionMin = BytecodeVersionMin,
     BytecodeVersionMax = BytecodeVersionMax,
     BytefallFallback = nil,
