@@ -657,7 +657,7 @@ local function ReconstructLinear(Proto, Strings, Options, Parsed, CaptureNames, 
             or Text:match("^function[%s]") ~= nil
             or Text:match("^local [%a_][%w_]*%s*=%s*function[%s%(]") ~= nil
             or Text:match("^[%a_][%w_]*%s*=%s*function[%s%(]") ~= nil
-            or Text:match("^return[%s$]") ~= nil
+            or Text == "return" or Text:match("^return%s") ~= nil
         )
         if IsSectionStart and #Lines > 0 and Lines[#Lines] ~= "" then
             Lines[#Lines + 1] = ""
@@ -1156,7 +1156,7 @@ local function ReconstructLinear(Proto, Strings, Options, Parsed, CaptureNames, 
         end
         return true, Result
     end
-    local function TryFoldCall(FunctionExpression, Arguments)
+    local function TryFoldCall(FunctionExpression, Arguments, ArgumentCount)
         local StringLibrary = string
         local MathLibrary = math
         local BitLibrary = bit32
@@ -1210,7 +1210,7 @@ local function ReconstructLinear(Proto, Strings, Options, Parsed, CaptureNames, 
             end
         end
         local Unpack = table.unpack or unpack
-        local Success, Result = pcall(Callback, Unpack(Arguments))
+        local Success, Result = pcall(Callback, Unpack(Arguments, 1, ArgumentCount or #Arguments))
         if not Success or FormatKnownValue(Result) == nil or (type(Result) == "string" and #Result > 65536) then
             return false, nil
         end
@@ -1722,9 +1722,10 @@ local function ReconstructLinear(Proto, Strings, Options, Parsed, CaptureNames, 
             local KnownArguments = {}
             local AllArgumentsKnown = true
             local function AddArgument(Register)
-                Arguments[#Arguments + 1] = GetReg(Register)
+                local ArgumentIndex = #Arguments + 1
+                Arguments[ArgumentIndex] = GetReg(Register)
                 if KnownValueFlags[Register] then
-                    KnownArguments[#KnownArguments + 1] = KnownValues[Register]
+                    KnownArguments[ArgumentIndex] = KnownValues[Register]
                 else
                     AllArgumentsKnown = false
                 end
@@ -1783,7 +1784,7 @@ local function ReconstructLinear(Proto, Strings, Options, Parsed, CaptureNames, 
             elseif ResultCount == 1 then
                 local FoldSuccess, FoldedValue = false, nil
                 if AllArgumentsKnown then
-                    FoldSuccess, FoldedValue = TryFoldCall(FunctionExpression, KnownArguments)
+                    FoldSuccess, FoldedValue = TryFoldCall(FunctionExpression, KnownArguments, #Arguments)
                 end
                 local FoldedExpression = FoldSuccess and FormatKnownValue(FoldedValue) or Call
                 WriteReg(A, FoldedExpression, PC, FoldedValue, FoldSuccess)
