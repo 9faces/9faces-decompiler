@@ -929,6 +929,33 @@ local function ReconstructLinear(Proto, Strings, Options, Parsed, CaptureNames, 
             UsedNames[Name] = true
             Registers[Register] = Name
         end
+        local CurrentInstruction = Proto.Instructions[ActiveInstructionIndex]
+        local IsSelfReferentialGlobal = not Declared[Register]
+            and CurrentInstruction
+            and (CurrentInstruction.Name == "GETGLOBAL" or CurrentInstruction.Name == "GETIMPORT" or CurrentInstruction.Name == "GETUPVAL")
+            and type(Expression) == "string"
+            and IsIdentifier(Expression)
+            and ExistingName == Expression
+        if IsSelfReferentialGlobal then
+            if IndentLevel == 0 then
+                local Name = ExistingName
+                RegisterWritten[Register] = true
+                RegisterInline[Register] = false
+                Declared[Register] = true
+                EmitLine("local " .. Name .. " = " .. Expression)
+                return Name
+            end
+            local BaseName = "Global" .. ExistingName
+            local GlobalName = BaseName
+            local Suffix = 2
+            while UsedNames[GlobalName] do
+                GlobalName = BaseName .. tostring(Suffix)
+                Suffix = Suffix + 1
+            end
+            UsedNames[GlobalName] = true
+            Registers[Register] = GlobalName
+            ExistingName = GlobalName
+        end
         RegisterWritten[Register] = true
         RegisterInline[Register] = false
         local Name = DeclareRegister(Register, PC)
@@ -1890,7 +1917,7 @@ local function FindBytefall()
 end
 local Ninefaces = {
     Name = "9faces Decompiler",
-    Version = "0.3.0-beta.18",
+    Version = "0.3.0-beta.19",
     BytecodeVersionMin = BytecodeVersionMin,
     BytecodeVersionMax = BytecodeVersionMax,
     BytefallFallback = nil,
