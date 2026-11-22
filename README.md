@@ -17,6 +17,10 @@ A headless executor-side Luau bytecode reader, disassembler, and source reconstr
 - Adds readable separation between hoisted declarations, top-level function sections, and final returns.
 - Recognizes generic compiler-generated debug names such as LocalN, Pcall, and Xpcall so they do not override stronger semantic names.
 - Removes redundant self-assignments without dropping initializers that may read an outer-scope value.
+- Inlines safe, single-use temporary values when no intervening side effects or writes make the substitution unsafe.
+- Removes unused temporary declarations left behind after expression simplification.
+- Uses meaningful nested-prototype debug names for named closures when the compiler provides them.
+- Infers readable names for common child, ancestor, character, bounding-box, and Roblox API results.
 - Uses PascalCase output names by default.
 - Exposes parsing, inspection, disassembly, synchronous decompilation, asynchronous decompilation, and cache controls.
 
