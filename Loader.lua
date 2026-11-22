@@ -661,7 +661,7 @@ local function ReconstructLinear(Proto, Strings, Options, Parsed, CaptureNames, 
             AddRegisterUse(Register)
         end
     end
-    for _, Item in ipairs(Proto.Instructions) do
+    for ItemIndex, Item in ipairs(Proto.Instructions) do
         local ItemName = Item.Name
         local ItemA = Item.A
         local ItemB = Item.B
@@ -689,7 +689,10 @@ local function ReconstructLinear(Proto, Strings, Options, Parsed, CaptureNames, 
         elseif ItemName == "NAMECALL" or ItemName == "NAMECALLUDATA" then
             AddRegisterUse(ItemB)
         elseif ItemName == "CALL" or ItemName == "CALLFB" then
-            AddRegisterUse(ItemA)
+            local PreviousInstruction = Proto.Instructions[ItemIndex - 1]
+            if not (PreviousInstruction and (PreviousInstruction.Name == "NAMECALL" or PreviousInstruction.Name == "NAMECALLUDATA") and PreviousInstruction.A == ItemA) then
+                AddRegisterUse(ItemA)
+            end
             if ItemB == 0 then
                 AddRegisterRange(ItemA + 1, Proto.MaxStackSize - 1)
             elseif ItemB > 1 then
@@ -861,7 +864,6 @@ local function ReconstructLinear(Proto, Strings, Options, Parsed, CaptureNames, 
             and not RegisterWritten[Register]
             and not HasNamedDebugLocal(Register, PC)
         HighestRegister = math.max(HighestRegister, Register)
-        RegisterWritten[Register] = true
         RegisterExpressions[Register] = ExpressionValue or Expression
         RegisterInline[Register] = CanInline
         KnownValueFlags[Register] = IsKnown == true
@@ -873,6 +875,7 @@ local function ReconstructLinear(Proto, Strings, Options, Parsed, CaptureNames, 
         if CanInline then
             return nil
         end
+        RegisterWritten[Register] = true
         local ExistingName = Registers[Register]
         if not ExistingName then
             ExistingName = GetDebugLocalName(Proto, Register, PC, UsedNames, UsePascalCase)
@@ -1817,7 +1820,7 @@ local function FindBytefall()
 end
 local Ninefaces = {
     Name = "9faces Decompiler",
-    Version = "0.3.0-beta.13",
+    Version = "0.3.0-beta.14",
     BytecodeVersionMin = BytecodeVersionMin,
     BytecodeVersionMax = BytecodeVersionMax,
     BytefallFallback = nil,
