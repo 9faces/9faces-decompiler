@@ -1063,6 +1063,9 @@ local function ReconstructLinear(Proto, Strings, Options, Parsed, CaptureNames, 
         else
             KnownValues[Register] = nil
         end
+        if (WasDeclared or IndentLevel > 0) and Name == Expression then
+            return Name
+        end
         if not WasDeclared and IndentLevel == 0 then
             EmitLine("local " .. Name .. " = " .. Expression)
         else
@@ -2082,7 +2085,7 @@ local function FindBytefall()
 end
 local ValmDecompiler = {
     Name = "Valm Decompiler",
-    Version = "0.3.0-beta.23",
+    Version = "0.3.0-beta.24",
     BytecodeVersionMin = BytecodeVersionMin,
     BytecodeVersionMax = BytecodeVersionMax,
     BytefallFallback = nil,
