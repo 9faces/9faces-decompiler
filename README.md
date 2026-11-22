@@ -2,23 +2,21 @@
 
 A headless executor-side Luau bytecode reader, disassembler, and source reconstructor. It does not create a separate window and does not call an external decompiler API.
 
-## Current native reconstruction
+## Native reconstruction
 
 - Reads Luau bytecode versions 3 through 14.
-- Reconstructs common forward branches, if/else blocks, while loops, repeat loops, numeric for loops, and generic for loops.
-- Reconstructs nested closures and captured upvalues.
-- Handles fixed and recoverable variable-argument calls and returns.
-- Rebuilds common table constructors and constant-backed table templates.
+- Reconstructs common branches, if/else blocks, while loops, repeat loops, numeric for loops, and generic for loops.
+- Reconstructs nested closures, captured upvalues, varargs, and table construction.
+- Decodes three-part GETIMPORT paths in the correct Luau order.
+- Accepts an explicit executor bytecode provider through `Ninefaces.SetBytecodeProvider`.
 - Tracks register values and scopes across reconstructed blocks.
 - Folds safe constant arithmetic and selected deterministic string, math, and bit32 calls.
 - Supports PascalCase output names by default.
 
-## Executor integration
+## Valm Dex ++
 
-Load `Loader.lua` in the executor environment. The loader exposes `Ninefaces.Decompile`, `Ninefaces.Disassemble`, `Ninefaces.Parse`, `Ninefaces.Inspect`, `Ninefaces.GetStatus`, and `Ninefaces.SetBytefallFallback`.
-
-Valm Dex ++ loads this file as its primary decompiler. Its existing Bytefall implementation remains the first fallback when a bytecode pattern cannot be reconstructed.
+Valm Dex ++ loads this module as its primary decompiler and passes the selected script's bytecode directly to 9faces. Bytefall remains the first fallback only when native reconstruction returns no source.
 
 ## Limits
 
-The native reconstructor is heuristic rather than a complete Luau compiler decompiler. Heavy control-flow flattening, virtualized state machines, irreducible branch graphs, unsupported class opcodes, and some executor-specific bytecode extensions may still require a fallback. It only receives bytecode the executor exposes for the selected script.
+The native reconstructor is heuristic rather than a complete Luau compiler decompiler. Heavily flattened or virtualized state machines, irreducible control-flow graphs, and experimental class opcodes may still require a fallback. The executor must expose bytecode for the selected script.
