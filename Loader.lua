@@ -771,6 +771,10 @@ local function ReconstructLinear(Proto, Strings, Options, Parsed, CaptureNames, 
     end
     local function WriteReg(Register, Expression, PC, KnownValue, IsKnown, ExpressionValue)
         local ExistingName = Registers[Register]
+        if not ExistingName then
+            ExistingName = GetDebugLocalName(Proto, Register, PC, UsedNames, UsePascalCase)
+            Registers[Register] = ExistingName
+        end
         if not RegisterWritten[Register] and not Declared[Register] and IsGenericDebugName(ExistingName) then
             local BaseName = InferRegisterName(ExpressionValue or Expression, Register)
             local Name = BaseName
