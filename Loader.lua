@@ -2122,7 +2122,14 @@ local function ReconstructLinear(Proto, Strings, Options, Parsed, CaptureNames, 
                     FoldSuccess, FoldedValue = TryFoldCall(FunctionExpression, KnownArguments, #Arguments)
                 end
                 local FoldedExpression = FoldSuccess and FormatKnownValue(FoldedValue) or Call
-                WriteReg(A, FoldedExpression, PC, FoldedValue, FoldSuccess)
+                local NamingExpression
+                if MethodCall and type(KnownArguments[1]) == "string" then
+                    local MethodName = MethodCall.Method
+                    if MethodName == "GetService" or MethodName == "WaitForChild" or MethodName == "FindFirstChild" or MethodName == "FindFirstAncestor" then
+                        NamingExpression = MethodCall.Receiver .. ":" .. MethodName .. "(" .. Quote(KnownArguments[1]) .. ")"
+                    end
+                end
+                WriteReg(A, FoldedExpression, PC, FoldedValue, FoldSuccess, NamingExpression)
                 MultiValue = nil
                 MultiValueStart = nil
             elseif ResultCount <= 16 then
@@ -2480,7 +2487,7 @@ local function FindBytefall()
 end
 local ValmDecompiler = {
     Name = "Valm Decompiler",
-    Version = "0.3.0-beta.28",
+    Version = "0.3.0-beta.29",
     BytecodeVersionMin = BytecodeVersionMin,
     BytecodeVersionMax = BytecodeVersionMax,
     BytefallFallback = nil,
