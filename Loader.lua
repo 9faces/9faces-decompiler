@@ -2295,15 +2295,11 @@ local function DisassembleBridge(Source, ProtoIndex)
 end
 Env.ValmDecompiler = ValmDecompiler
 Env.ValmDecompilerInstalledDecompile = DecompileBridge
-Env.Ninefaces = ValmDecompiler
-Env.NinefacesInstalledDecompile = DecompileBridge
 Env.decompile = DecompileBridge
 Env.disassemble = DisassembleBridge
 if type(_G) == "table" then
     _G.ValmDecompiler = ValmDecompiler
     _G.ValmDecompilerInstalledDecompile = DecompileBridge
-    _G.Ninefaces = ValmDecompiler
-    _G.NinefacesInstalledDecompile = DecompileBridge
     _G.decompile = DecompileBridge
     _G.disassemble = DisassembleBridge
 end
