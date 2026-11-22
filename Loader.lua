@@ -639,12 +639,23 @@ local function GetDebugLocalName(Proto, Register, PC, UsedNames, UsePascalCase)
     UsedNames[Name] = true
     return Name
 end
+local function IsIdentifierPath(Value)
+    if Value == "" or Value:sub(1, 1) == "." or Value:sub(-1) == "." or Value:find("..", 1, true) then
+        return false
+    end
+    for Part in Value:gmatch("[^%.]+") do
+        if not Part:match("^[%a_][%w_]*$") then
+            return false
+        end
+    end
+    return true
+end
 local function IsSimpleTemporaryValue(Value)
     local Text = tostring(Value or ""):match("^%s*(.-)%s*$")
     if Text == "" or Text == "nil" or Text == "true" or Text == "false" then
         return Text ~= ""
     end
-    if Text:match("^[%a_][%w_]*(%.[%a_][%w_]*)*$") then
+    if IsIdentifierPath(Text) then
         return true
     end
     if Text:match("^0[xX][%da-fA-F]+$") or Text:match("^[%+%-]?%d+%.?%d*[eE]?[%+%-]?%d*$") or Text:match("^[%+%-]?%.%d+[eE]?[%+%-]?%d*$") then
