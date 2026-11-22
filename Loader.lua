@@ -778,6 +778,17 @@ local function ReconstructLinear(Proto, Strings, Options, Parsed, CaptureNames, 
     local RegisterWritten = {}
     local RegisterDebugLocals = {}
     local DebugLocalNames = {}
+    local function GetFreshRegisterName(BaseName)
+        local Base = PascalCase(BaseName)
+        local Name = Base
+        local Suffix = 2
+        while UsedNames[Name] do
+            Name = Base .. tostring(Suffix)
+            Suffix = Suffix + 1
+        end
+        UsedNames[Name] = true
+        return Name
+    end
     local function GetActiveDebugLocal(Register, PC)
         for _, Local in ipairs(Proto.DebugLocals) do
             if Local.Register == Register and Local.StartPC <= PC and Local.EndPC > PC and type(Local.Name) == "string" and Local.Name ~= "" then
@@ -788,20 +799,27 @@ local function ReconstructLinear(Proto, Strings, Options, Parsed, CaptureNames, 
     end
     local function RefreshRegisterLocal(Register, PC)
         local ActiveLocal = GetActiveDebugLocal(Register, PC or CurrentPC)
-        if not ActiveLocal or RegisterDebugLocals[Register] == ActiveLocal then
+        local PreviousLocal = RegisterDebugLocals[Register]
+        if ActiveLocal == PreviousLocal then
             return
         end
         RegisterDebugLocals[Register] = ActiveLocal
+        if not ActiveLocal then
+            if Register >= Proto.NumParams then
+                Registers[Register] = nil
+                RegisterExpressions[Register] = nil
+                RegisterInline[Register] = false
+                KnownValues[Register] = nil
+                KnownValueFlags[Register] = false
+                RegisterWritten[Register] = false
+                Declared[Register] = false
+            end
+            return
+        end
         local Name = DebugLocalNames[ActiveLocal]
         if not Name then
             local Base = UsePascalCase and PascalCase(ActiveLocal.Name) or (IsIdentifier(ActiveLocal.Name) and ActiveLocal.Name or PascalCase(ActiveLocal.Name))
-            Name = Base
-            local Suffix = 2
-            while UsedNames[Name] do
-                Name = Base .. tostring(Suffix)
-                Suffix = Suffix + 1
-            end
-            UsedNames[Name] = true
+            Name = GetFreshRegisterName(Base)
             DebugLocalNames[ActiveLocal] = Name
         end
         Registers[Register] = Name
@@ -916,15 +934,15 @@ local function ReconstructLinear(Proto, Strings, Options, Parsed, CaptureNames, 
         end
         return "Local" .. tostring(Register + 1)
     end
-    local function DeclareRegister(Register, PC)
+    local function DeclareRegister(Register, PC, AllowInlineDeclaration)
         RefreshRegisterLocal(Register, PC)
         local Name = Registers[Register]
         if not Name then
-            Name = GetDebugLocalName(Proto, Register, PC, UsedNames, UsePascalCase)
+            Name = GetFreshRegisterName(InferRegisterName(RegisterExpressions[Register] or "Value", Register))
             Registers[Register] = Name
         end
         if not Declared[Register] then
-            if not TopDeclarationSet[Name] then
+            if not (AllowInlineDeclaration and IndentLevel == 0) and not TopDeclarationSet[Name] then
                 TopDeclarationSet[Name] = true
                 TopDeclarations[#TopDeclarations + 1] = Name
             end
@@ -942,9 +960,27 @@ local function ReconstructLinear(Proto, Strings, Options, Parsed, CaptureNames, 
     end
     local function WriteReg(Register, Expression, PC, KnownValue, IsKnown, ExpressionValue, InlineCandidate)
         RefreshRegisterLocal(Register, PC)
+        local ActiveLocal = GetActiveDebugLocal(Register, PC)
+        if not ActiveLocal and Register >= Proto.NumParams and (RegisterWritten[Register] or RegisterInline[Register] or Declared[Register]) then
+            local BaseName = InferRegisterName(ExpressionValue or Expression, Register)
+            Registers[Register] = GetFreshRegisterName(BaseName)
+            RegisterExpressions[Register] = Registers[Register]
+            RegisterInline[Register] = false
+            KnownValues[Register] = nil
+            KnownValueFlags[Register] = false
+            RegisterWritten[Register] = false
+            Declared[Register] = false
+        end
+        local CurrentInstruction = Proto.Instructions[ActiveInstructionIndex]
+        local IsImmutableSource = CurrentInstruction
+            and (CurrentInstruction.Name == "GETGLOBAL" or CurrentInstruction.Name == "GETIMPORT" or CurrentInstruction.Name == "GETUPVAL")
+        local IsLiteralSource = CurrentInstruction
+            and (CurrentInstruction.Name == "LOADNIL" or CurrentInstruction.Name == "LOADB" or CurrentInstruction.Name == "LOADN" or CurrentInstruction.Name == "LOADK" or CurrentInstruction.Name == "LOADKX")
+            and IsKnown == true
+            and (KnownValue == nil or type(KnownValue) == "string" or type(KnownValue) == "boolean" or type(KnownValue) == "number")
+        local UseCount = RegisterUseCountsByInstruction[ActiveInstructionIndex] and RegisterUseCountsByInstruction[ActiveInstructionIndex][Register] or 0
         local CanInline = InlineCandidate == true
-            and RegisterUseCountsByInstruction[ActiveInstructionIndex]
-            and RegisterUseCountsByInstruction[ActiveInstructionIndex][Register] == 1
+            and (UseCount == 1 or IsImmutableSource or IsLiteralSource)
             and not Declared[Register]
             and not RegisterWritten[Register]
             and not HasNamedDebugLocal(Register, PC)
@@ -965,56 +1001,27 @@ local function ReconstructLinear(Proto, Strings, Options, Parsed, CaptureNames, 
             ExistingName = GetDebugLocalName(Proto, Register, PC, UsedNames, UsePascalCase)
             Registers[Register] = ExistingName
         end
-        if not RegisterWritten[Register] and not Declared[Register] and IsGenericDebugName(ExistingName) then
+        if not ActiveLocal and Register >= Proto.NumParams and not RegisterWritten[Register] and not Declared[Register] and IsGenericDebugName(ExistingName) then
             local BaseName = InferRegisterName(ExpressionValue or Expression, Register)
-            local Name = BaseName
-            local Suffix = 2
-            while UsedNames[Name] do
-                Name = BaseName .. tostring(Suffix)
-                Suffix = Suffix + 1
-            end
-            UsedNames[Name] = true
-            Registers[Register] = Name
+            Registers[Register] = GetFreshRegisterName(BaseName)
         end
-        local CurrentInstruction = Proto.Instructions[ActiveInstructionIndex]
-        local IsSelfReferentialGlobal = not Declared[Register]
-            and CurrentInstruction
-            and (CurrentInstruction.Name == "GETGLOBAL" or CurrentInstruction.Name == "GETIMPORT" or CurrentInstruction.Name == "GETUPVAL")
-            and type(Expression) == "string"
-            and IsIdentifier(Expression)
-            and ExistingName == Expression
-        if IsSelfReferentialGlobal then
-            if IndentLevel == 0 then
-                local Name = ExistingName
-                RegisterWritten[Register] = true
-                RegisterInline[Register] = false
-                Declared[Register] = true
-                EmitLine("local " .. Name .. " = " .. Expression)
-                return Name
-            end
-            local BaseName = "Global" .. ExistingName
-            local GlobalName = BaseName
-            local Suffix = 2
-            while UsedNames[GlobalName] do
-                GlobalName = BaseName .. tostring(Suffix)
-                Suffix = Suffix + 1
-            end
-            UsedNames[GlobalName] = true
-            Registers[Register] = GlobalName
-            ExistingName = GlobalName
-        end
+        local WasDeclared = Declared[Register] == true
         RegisterWritten[Register] = true
         RegisterInline[Register] = false
-        local Name = DeclareRegister(Register, PC)
+        local Name = DeclareRegister(Register, PC, IndentLevel == 0)
         HighestRegister = math.max(HighestRegister, Register)
-        RegisterExpressions[Register] = ExpressionValue or Expression
+        RegisterExpressions[Register] = Name
         KnownValueFlags[Register] = IsKnown == true
         if IsKnown == true then
             KnownValues[Register] = KnownValue
         else
             KnownValues[Register] = nil
         end
-        EmitLine(Name .. " = " .. Expression)
+        if not WasDeclared and IndentLevel == 0 then
+            EmitLine("local " .. Name .. " = " .. Expression)
+        else
+            EmitLine(Name .. " = " .. Expression)
+        end
         return Name
     end
     local function InvalidateRegister(Register, Name)
@@ -1651,6 +1658,7 @@ local function ReconstructLinear(Proto, Strings, Options, Parsed, CaptureNames, 
                 end
             end
             local Call
+            local FunctionExpression = MethodCall and (MethodCall.Receiver .. "." .. MethodCall.Method) or GetRegExpression(A)
             if MethodCall then
                 if IsIdentifier(MethodCall.Method) then
                     Call = MethodCall.Receiver .. ":" .. MethodCall.Method .. "(" .. table.concat(Arguments, ", ") .. ")"
@@ -1663,7 +1671,11 @@ local function ReconstructLinear(Proto, Strings, Options, Parsed, CaptureNames, 
                 end
                 NameCalls[A] = nil
             else
-                Call = GetReg(A) .. "(" .. table.concat(Arguments, ", ") .. ")"
+                local FunctionValue = GetReg(A)
+                if type(FunctionExpression) == "string" and IsIdentifier(FunctionExpression) then
+                    FunctionValue = FunctionExpression
+                end
+                Call = FunctionValue .. "(" .. table.concat(Arguments, ", ") .. ")"
             end
             local ResultCount = C - 1
             if C == 0 then
@@ -1676,7 +1688,6 @@ local function ReconstructLinear(Proto, Strings, Options, Parsed, CaptureNames, 
                 MultiValue = nil
                 MultiValueStart = nil
             elseif ResultCount == 1 then
-                local FunctionExpression = MethodCall and (GetRegExpression(A) .. "." .. MethodCall.Method) or GetRegExpression(A)
                 local FoldSuccess, FoldedValue = false, nil
                 if AllArgumentsKnown then
                     FoldSuccess, FoldedValue = TryFoldCall(FunctionExpression, KnownArguments)
@@ -1687,13 +1698,63 @@ local function ReconstructLinear(Proto, Strings, Options, Parsed, CaptureNames, 
                 MultiValueStart = nil
             elseif ResultCount <= 16 then
                 local ResultNames = {}
-                for Register = A, A + ResultCount - 1 do
-                    local ResultName = DeclareRegister(Register, PC)
+                local ResultWasDeclared = {}
+                local ResultBases = {}
+                local IsProtectedCall = not MethodCall and (FunctionExpression == "pcall" or FunctionExpression == "xpcall")
+                for Offset = 0, ResultCount - 1 do
+                    local Register = A + Offset
+                    local BaseName
+                    if IsProtectedCall and Offset == 0 then
+                        BaseName = "Success"
+                    elseif IsProtectedCall and Offset == 1 then
+                        BaseName = "Result"
+                    elseif FunctionExpression == "string.gsub" and Offset == 1 then
+                        BaseName = "ReplacementCount"
+                    elseif FunctionExpression == "string.find" and Offset == 0 then
+                        BaseName = "StartIndex"
+                    elseif FunctionExpression == "string.find" and Offset == 1 then
+                        BaseName = "EndIndex"
+                    else
+                        BaseName = Offset == 0 and "Result" or ("Result" .. tostring(Offset + 1))
+                    end
+                    RefreshRegisterLocal(Register, PC)
+                    local ActiveLocal = GetActiveDebugLocal(Register, PC)
+                    if not ActiveLocal and Register >= Proto.NumParams then
+                        Registers[Register] = GetFreshRegisterName(BaseName)
+                        RegisterExpressions[Register] = Registers[Register]
+                        RegisterInline[Register] = false
+                        KnownValues[Register] = nil
+                        KnownValueFlags[Register] = false
+                        RegisterWritten[Register] = false
+                        Declared[Register] = false
+                    end
+                    local WasDeclared = Declared[Register] == true
+                    local ResultName = DeclareRegister(Register, PC, IndentLevel == 0)
+                    RegisterWritten[Register] = true
+                    RegisterInline[Register] = false
+                    RegisterExpressions[Register] = ResultName
                     HighestRegister = math.max(HighestRegister, Register)
-                    InvalidateRegister(Register, ResultName)
                     ResultNames[#ResultNames + 1] = ResultName
+                    ResultWasDeclared[#ResultWasDeclared + 1] = WasDeclared
+                    ResultBases[#ResultBases + 1] = ResultName
                 end
-                EmitLine(table.concat(ResultNames, ", ") .. " = " .. Call)
+                local CanDeclareAllLocally = IndentLevel == 0
+                for _, WasDeclared in ipairs(ResultWasDeclared) do
+                    if WasDeclared then
+                        CanDeclareAllLocally = false
+                    end
+                end
+                if CanDeclareAllLocally then
+                    EmitLine("local " .. table.concat(ResultNames, ", ") .. " = " .. Call)
+                else
+                    for Index, WasDeclared in ipairs(ResultWasDeclared) do
+                        if not WasDeclared and IndentLevel == 0 and not TopDeclarationSet[ResultNames[Index]] then
+                            TopDeclarationSet[ResultNames[Index]] = true
+                            TopDeclarations[#TopDeclarations + 1] = ResultNames[Index]
+                        end
+                    end
+                    EmitLine(table.concat(ResultNames, ", ") .. " = " .. Call)
+                end
                 MultiValue = nil
                 MultiValueStart = nil
             else
@@ -1964,7 +2025,7 @@ local function FindBytefall()
 end
 local Ninefaces = {
     Name = "9faces Decompiler",
-    Version = "0.3.0-beta.20",
+    Version = "0.3.0-beta.21",
     BytecodeVersionMin = BytecodeVersionMin,
     BytecodeVersionMax = BytecodeVersionMax,
     BytefallFallback = nil,
@@ -2150,7 +2211,7 @@ function Ninefaces.GetStatus()
         RobloxOpcodeNormalization = true,
         RobloxOpcodeMultiplier = RobloxOpcodeMultiplier,
         BytefallConnected = type(Fallback) == "function",
-        NativeDecompiler = "Structured control flow, nested closures, debug-local register lifetime tracking, single-use expression forwarding, semantic local naming, varargs, table reconstruction, and constant folding",
+        NativeDecompiler = "Structured control flow, SSA-style register versions, inline local declarations, protected-call result naming, debug-local lifetime tracking, semantic local naming, varargs, table reconstruction, and constant folding",
         SemanticLocalNaming = true,
         Disassembler = "Luau bytecode versions 3 through 14",
         CooperativeYield = type(task) == "table" and type(task.wait) == "function",
