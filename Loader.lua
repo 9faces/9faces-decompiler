@@ -1514,31 +1514,35 @@ local function GetBytecode(Source)
     return Result
 end
 local function FindBytefall()
-    local Candidates = {
-        Env.Bytefall,
-        Env.ByteFall,
-        Env.bytefall,
-        Env.BytefallDecompiler,
-        Env.ByteFallDecompiler,
-        Env.BytefallDecompile,
-        Env.ByteFallDecompile,
-        Env.byteFallDecompile,
-        Env.bytefallDecompile,
-        Env.bytefall_decompile,
-        Env.Bytefall_Decompile,
-        Env.BytefallFallback,
-        Env.ByteFallFallback,
-        Env.bytefallFallback,
-        Env.BytefallAPI,
-        _G.Bytefall,
-        _G.ByteFall,
-        _G.bytefall,
-        _G.BytefallDecompiler,
-        _G.BytefallDecompile,
-        _G.ByteFallDecompiler,
-        _G.byteFallDecompile,
-        _G.bytefallDecompile
-    }
+    local Candidates = {}
+    local function AddCandidate(Candidate)
+        if Candidate ~= nil then
+            Candidates[#Candidates + 1] = Candidate
+        end
+    end
+    AddCandidate(Env.Bytefall)
+    AddCandidate(Env.ByteFall)
+    AddCandidate(Env.bytefall)
+    AddCandidate(Env.BytefallDecompiler)
+    AddCandidate(Env.ByteFallDecompiler)
+    AddCandidate(Env.BytefallDecompile)
+    AddCandidate(Env.ByteFallDecompile)
+    AddCandidate(Env.byteFallDecompile)
+    AddCandidate(Env.bytefallDecompile)
+    AddCandidate(Env.bytefall_decompile)
+    AddCandidate(Env.Bytefall_Decompile)
+    AddCandidate(Env.BytefallFallback)
+    AddCandidate(Env.ByteFallFallback)
+    AddCandidate(Env.bytefallFallback)
+    AddCandidate(Env.BytefallAPI)
+    AddCandidate(_G.Bytefall)
+    AddCandidate(_G.ByteFall)
+    AddCandidate(_G.bytefall)
+    AddCandidate(_G.BytefallDecompiler)
+    AddCandidate(_G.BytefallDecompile)
+    AddCandidate(_G.ByteFallDecompiler)
+    AddCandidate(_G.byteFallDecompile)
+    AddCandidate(_G.bytefallDecompile)
     for _, Candidate in ipairs(Candidates) do
         if type(Candidate) == "function" then
             return Candidate
@@ -1558,7 +1562,7 @@ local function FindBytefall()
 end
 local Ninefaces = {
     Name = "9faces Decompiler",
-    Version = "0.3.0-beta.5",
+    Version = "0.3.0-beta.6",
     BytecodeVersionMin = BytecodeVersionMin,
     BytecodeVersionMax = BytecodeVersionMax,
     BytefallFallback = nil,
