@@ -5,7 +5,7 @@ A headless executor-side Luau bytecode reader, disassembler, and source reconstr
 ## Native reconstruction
 
 - Reads Luau bytecode versions 3 through 14.
-- Correctly consumes auxiliary words for all six register-comparison jump instructions, preventing the instruction stream from becoming misaligned.
+- Automatically detects and normalizes Roblox production opcode bytes before decoding. Standard unencoded Luau bytecode is left unchanged.
 - Reconstructs common branches, if/else blocks, while loops, repeat loops, numeric for loops, and generic for loops.
 - Reconstructs nested closures, captured upvalues, varargs, and table construction.
 - Decodes one-, two-, and three-part GETIMPORT paths in Luau order.
@@ -13,7 +13,7 @@ A headless executor-side Luau bytecode reader, disassembler, and source reconstr
 - Tracks register values and scopes across reconstructed blocks.
 - Folds safe constant arithmetic and selected deterministic string, math, and bit32 calls.
 - Supports PascalCase output names by default.
-- Includes the 9faces ASCII banner at the beginning of `Loader.lua`.
+- Includes the requested 9faces ASCII banner at the beginning of `Loader.lua`.
 
 ## Valm Dex ++
 
