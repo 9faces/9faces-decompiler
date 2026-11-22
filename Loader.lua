@@ -422,6 +422,55 @@ local function DecodeInstructions(Proto)
     Proto.Instructions = Instructions
     return Instructions
 end
+local RobloxOpcodeMultiplier = 203
+local function IsOpcodeStreamValid(Protos, Multiplier)
+    for _, Proto in ipairs(Protos) do
+        local PC = 1
+        while PC <= #Proto.Words do
+            local Word = Proto.Words[PC]
+            local EncodedOpcode = Word % 256
+            local Opcode = (EncodedOpcode * Multiplier) % 256
+            if OpcodeNames[Opcode + 1] == nil then
+                return false, "Unknown opcode " .. tostring(Opcode) .. " at instruction " .. tostring(PC - 1)
+            end
+            if AuxiliaryOpcodes[Opcode] then
+                if PC + 1 > #Proto.Words then
+                    return false, "Missing auxiliary word for " .. OpcodeNames[Opcode + 1] .. " at instruction " .. tostring(PC - 1)
+                end
+                PC = PC + 2
+            else
+                PC = PC + 1
+            end
+        end
+    end
+    return true
+end
+local function NormalizeOpcodeEncoding(Protos)
+    local StandardValid, StandardError = IsOpcodeStreamValid(Protos, 1)
+    if StandardValid then
+        return 1
+    end
+    local RobloxValid, RobloxError = IsOpcodeStreamValid(Protos, RobloxOpcodeMultiplier)
+    if not RobloxValid then
+        error("Invalid Luau opcode stream. Standard decoding: " .. tostring(StandardError) .. "; Roblox decoding: " .. tostring(RobloxError), 0)
+    end
+    for _, Proto in ipairs(Protos) do
+        local PC = 1
+        while PC <= #Proto.Words do
+            local Word = Proto.Words[PC]
+            local EncodedOpcode = Word % 256
+            local Opcode = (EncodedOpcode * RobloxOpcodeMultiplier) % 256
+            Proto.Words[PC] = Word - EncodedOpcode + Opcode
+            if AuxiliaryOpcodes[Opcode] then
+                PC = PC + 2
+            else
+                PC = PC + 1
+            end
+            YieldControl()
+        end
+    end
+    return RobloxOpcodeMultiplier
+end
 local function ParseBytecode(Data)
     if type(Data) ~= "string" then
         error("Bytecode must be a string", 0)
@@ -492,10 +541,11 @@ local function ParseBytecode(Data)
     if not MainProto then
         error("Main prototype index is invalid", 0)
     end
+    local OpcodeMultiplier = NormalizeOpcodeEncoding(Protos)
     for _, Proto in ipairs(Protos) do
         DecodeInstructions(Proto)
     end
-    return {Version = Version, TypeVersion = TypeVersion, Strings = Strings, Protos = Protos, MainProto = MainProto, MainProtoIndex = MainProtoIndex, TotalInstructions = TotalInstructions}
+    return {Version = Version, TypeVersion = TypeVersion, Strings = Strings, Protos = Protos, MainProto = MainProto, MainProtoIndex = MainProtoIndex, TotalInstructions = TotalInstructions, OpcodeMultiplier = OpcodeMultiplier}
 end
 local function GetConstant(Proto, Index)
     local Constant = Proto.Constants[Index + 1]
@@ -1513,6 +1563,7 @@ local function DisassembleParsed(Parsed, SelectedProto)
         "Type Version: " .. tostring(Parsed.TypeVersion),
         "Prototype Count: " .. tostring(#Parsed.Protos),
         "Instruction Count: " .. tostring(Parsed.TotalInstructions),
+        "Opcode Multiplier: " .. tostring(Parsed.OpcodeMultiplier or 1),
         ""
     }
     local Protos = SelectedProto and {SelectedProto} or Parsed.Protos
@@ -1600,7 +1651,7 @@ local function FindBytefall()
 end
 local Ninefaces = {
     Name = "9faces Decompiler",
-    Version = "0.3.0-beta.9",
+    Version = "0.3.0-beta.10",
     BytecodeVersionMin = BytecodeVersionMin,
     BytecodeVersionMax = BytecodeVersionMax,
     BytefallFallback = nil,
@@ -1610,7 +1661,8 @@ local Ninefaces = {
     CacheLimit = CacheLimit,
     MaximumBytecodeBytes = MaxBytecodeBytes,
     MaximumInstructions = MaxInstructions,
-    Cache = Cache
+    Cache = Cache,
+    LastOpcodeMultiplier = nil
 }
 function Ninefaces.SetBytefallFallback(Callback)
     if Callback ~= nil and type(Callback) ~= "function" then
@@ -1630,7 +1682,9 @@ end
 function Ninefaces.Parse(Source)
     local Bytecode = GetBytecode(Source)
     YieldCounter = 0
-    return ParseBytecode(Bytecode)
+    local Parsed = ParseBytecode(Bytecode)
+    Ninefaces.LastOpcodeMultiplier = Parsed.OpcodeMultiplier or 1
+    return Parsed
 end
 function Ninefaces.Inspect(Source)
     local Success, Result = pcall(function()
@@ -1708,6 +1762,7 @@ function Ninefaces.Decompile(Source, Options)
     local NativeError
     local NativeSuccess, NativeResult, NativeMessage = pcall(function()
         Parsed = ParseBytecode(Bytecode)
+        Ninefaces.LastOpcodeMultiplier = Parsed.OpcodeMultiplier or 1
         return ReconstructLinear(Parsed.MainProto, Parsed.Strings, Options, Parsed, {}, 0)
     end)
     if NativeSuccess and type(NativeResult) == "string" then
@@ -1779,6 +1834,8 @@ function Ninefaces.GetStatus()
         Name = Ninefaces.Name,
         Version = Ninefaces.Version,
         BytecodeVersions = tostring(BytecodeVersionMin) .. "-" .. tostring(BytecodeVersionMax),
+        RobloxOpcodeNormalization = true,
+        RobloxOpcodeMultiplier = RobloxOpcodeMultiplier,
         BytefallConnected = type(Fallback) == "function",
         NativeDecompiler = "Structured branches, nested closures, varargs, table reconstruction, register scope recovery, and constant folding",
         Disassembler = "Luau bytecode versions 3 through 14",
