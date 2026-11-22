@@ -706,6 +706,14 @@ local function GetAssignmentParts(Line)
         Names = Names
     }
 end
+local function IsFieldIdentifier(Text, StartIndex)
+    local PreviousIndex = StartIndex - 1
+    while PreviousIndex > 0 and Text:sub(PreviousIndex, PreviousIndex):match("%s") do
+        PreviousIndex = PreviousIndex - 1
+    end
+    local PreviousCharacter = Text:sub(PreviousIndex, PreviousIndex)
+    return PreviousCharacter == "." or PreviousCharacter == ":"
+end
 local function CountCodeIdentifier(Line, TargetName)
     local Count = 0
     local Index = 1
@@ -733,7 +741,7 @@ local function CountCodeIdentifier(Line, TargetName)
             while Index <= #Line and Line:sub(Index, Index):match("[%w_]") do
                 Index = Index + 1
             end
-            if Line:sub(StartIndex, Index - 1) == TargetName then
+            if Line:sub(StartIndex, Index - 1) == TargetName and not IsFieldIdentifier(Line, StartIndex) then
                 Count = Count + 1
             end
         else
@@ -773,7 +781,7 @@ local function ReplaceCodeIdentifier(Line, TargetName, Replacement)
                 Index = Index + 1
             end
             local Identifier = Line:sub(StartIndex, Index - 1)
-            Output[#Output + 1] = Identifier == TargetName and Replacement or Identifier
+            Output[#Output + 1] = Identifier == TargetName and not IsFieldIdentifier(Line, StartIndex) and Replacement or Identifier
         else
             Output[#Output + 1] = Character
             Index = Index + 1
@@ -806,7 +814,9 @@ local function GetExpressionIdentifiers(Expression)
             while Index <= #Expression and Expression:sub(Index, Index):match("[%w_]") do
                 Index = Index + 1
             end
-            Identifiers[Expression:sub(StartIndex, Index - 1)] = true
+            if not IsFieldIdentifier(Expression, StartIndex) then
+                Identifiers[Expression:sub(StartIndex, Index - 1)] = true
+            end
         else
             Index = Index + 1
         end
