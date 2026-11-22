@@ -12,7 +12,9 @@ A headless executor-side Luau bytecode reader, disassembler, and source reconstr
 - Decodes one-, two-, and three-part GETIMPORT paths in Luau order.
 - Accepts an explicit executor bytecode provider through `ValmDecompiler.SetBytecodeProvider`.
 - Tracks register values and scopes across reconstructed blocks.
-- Infers readable local names from debug-local lifetimes, Roblox services, child lookups, indexed properties, common method results, and protected-call results.
+- Infers readable local names from debug-local lifetimes, Roblox services, child lookups, indexed properties, attributes, property-change signals, common Roblox method results, and protected-call results.
+- Folds safe constant string and math calls, including bounded `string.format` and `string.match` expressions.
+- Adds readable separation between hoisted declarations, top-level function sections, and final returns.
 - Recognizes generic compiler-generated debug names such as LocalN, Pcall, and Xpcall so they do not override stronger semantic names.
 - Removes redundant self-assignments without dropping initializers that may read an outer-scope value.
 - Uses PascalCase output names by default.
