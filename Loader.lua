@@ -647,18 +647,20 @@ local function ReconstructLinear(Proto, Strings, Options, Parsed, CaptureNames, 
     local Lines = {}
     local IndentLevel = 0
     local CurrentPC = 0
+    local ActiveInstructionIndex = 1
     local function EmitLine(Value)
         Lines[#Lines + 1] = string.rep("    ", IndentLevel) .. tostring(Value)
     end
-    local RegisterUseCounts = {}
-    local function AddRegisterUse(Register)
+    local RegisterReads = {}
+    local RegisterWrites = {}
+    local function AddRegisterUse(Target, Register)
         if type(Register) == "number" and Register >= 0 and Register < Proto.MaxStackSize then
-            RegisterUseCounts[Register] = (RegisterUseCounts[Register] or 0) + 1
+            Target[Register] = true
         end
     end
-    local function AddRegisterRange(First, Last)
+    local function AddRegisterRange(Target, First, Last)
         for Register = First, math.min(Last, Proto.MaxStackSize - 1) do
-            AddRegisterUse(Register)
+            AddRegisterUse(Target, Register)
         end
     end
     for ItemIndex, Item in ipairs(Proto.Instructions) do
@@ -666,62 +668,97 @@ local function ReconstructLinear(Proto, Strings, Options, Parsed, CaptureNames, 
         local ItemA = Item.A
         local ItemB = Item.B
         local ItemC = Item.C
+        local Reads = {}
+        local Writes = {}
         if ItemName == "MOVE" or ItemName == "SETGLOBAL" or ItemName == "SETUPVAL" or ItemName == "NOT" or ItemName == "MINUS" or ItemName == "LENGTH" then
-            AddRegisterUse(ItemName == "MOVE" and ItemB or ItemA)
+            AddRegisterUse(Reads, ItemName == "MOVE" and ItemB or ItemA)
         elseif ItemName == "GETTABLEKS" or ItemName == "GETTABLEN" or ItemName == "GETUDATAKS" then
-            AddRegisterUse(ItemB)
+            AddRegisterUse(Reads, ItemB)
         elseif ItemName == "GETTABLE" then
-            AddRegisterUse(ItemB)
-            AddRegisterUse(ItemC)
+            AddRegisterUse(Reads, ItemB)
+            AddRegisterUse(Reads, ItemC)
         elseif ItemName == "SETTABLE" then
-            AddRegisterUse(ItemA)
-            AddRegisterUse(ItemB)
-            AddRegisterUse(ItemC)
+            AddRegisterUse(Reads, ItemA)
+            AddRegisterUse(Reads, ItemB)
+            AddRegisterUse(Reads, ItemC)
         elseif ItemName == "SETTABLEKS" or ItemName == "SETTABLEN" or ItemName == "SETUDATAKS" then
-            AddRegisterUse(ItemA)
-            AddRegisterUse(ItemB)
+            AddRegisterUse(Reads, ItemA)
+            AddRegisterUse(Reads, ItemB)
         elseif ItemName == "ADD" or ItemName == "SUB" or ItemName == "MUL" or ItemName == "DIV" or ItemName == "MOD" or ItemName == "POW" or ItemName == "IDIV" or ItemName == "AND" or ItemName == "OR" or ItemName == "CONCAT" then
-            AddRegisterRange(ItemB, ItemC)
+            AddRegisterRange(Reads, ItemB, ItemC)
         elseif ItemName == "ADDK" or ItemName == "SUBK" or ItemName == "MULK" or ItemName == "DIVK" or ItemName == "MODK" or ItemName == "POWK" or ItemName == "IDIVK" or ItemName == "ANDK" or ItemName == "ORK" then
-            AddRegisterUse(ItemB)
+            AddRegisterUse(Reads, ItemB)
         elseif ItemName == "SUBRK" or ItemName == "DIVRK" then
-            AddRegisterUse(ItemC)
+            AddRegisterUse(Reads, ItemC)
         elseif ItemName == "NAMECALL" or ItemName == "NAMECALLUDATA" then
-            AddRegisterUse(ItemB)
+            AddRegisterUse(Reads, ItemB)
         elseif ItemName == "CALL" or ItemName == "CALLFB" then
-            local PreviousInstruction = Proto.Instructions[ItemIndex - 1]
-            if not (PreviousInstruction and (PreviousInstruction.Name == "NAMECALL" or PreviousInstruction.Name == "NAMECALLUDATA") and PreviousInstruction.A == ItemA) then
-                AddRegisterUse(ItemA)
-            end
+            AddRegisterUse(Reads, ItemA)
             if ItemB == 0 then
-                AddRegisterRange(ItemA + 1, Proto.MaxStackSize - 1)
+                AddRegisterRange(Reads, ItemA + 1, Proto.MaxStackSize - 1)
             elseif ItemB > 1 then
-                AddRegisterRange(ItemA + 1, ItemA + ItemB - 1)
+                AddRegisterRange(Reads, ItemA + 1, ItemA + ItemB - 1)
             end
         elseif ItemName == "RETURN" then
             if ItemB == 0 then
-                AddRegisterRange(ItemA, Proto.MaxStackSize - 1)
+                AddRegisterRange(Reads, ItemA, Proto.MaxStackSize - 1)
             elseif ItemB > 1 then
-                AddRegisterRange(ItemA, ItemA + ItemB - 2)
+                AddRegisterRange(Reads, ItemA, ItemA + ItemB - 2)
             end
         elseif ItemName == "SETLIST" then
-            AddRegisterUse(ItemA)
+            AddRegisterUse(Reads, ItemA)
             if ItemC == 0 then
-                AddRegisterRange(ItemB, Proto.MaxStackSize - 1)
+                AddRegisterRange(Reads, ItemB, Proto.MaxStackSize - 1)
             elseif ItemC > 1 then
-                AddRegisterRange(ItemB, ItemB + ItemC - 2)
+                AddRegisterRange(Reads, ItemB, ItemB + ItemC - 2)
             end
         elseif ItemName == "JUMPIF" or ItemName == "JUMPIFNOT" or ItemName == "JUMPIFEQ" or ItemName == "JUMPIFLE" or ItemName == "JUMPIFLT" or ItemName == "JUMPIFNOTEQ" or ItemName == "JUMPIFNOTLE" or ItemName == "JUMPIFNOTLT" or ItemName == "JUMPXEQKNIL" or ItemName == "JUMPXEQKB" or ItemName == "JUMPXEQKN" or ItemName == "JUMPXEQKS" then
-            AddRegisterUse(ItemA)
+            AddRegisterUse(Reads, ItemA)
             if Item.Aux and (ItemName == "JUMPIFEQ" or ItemName == "JUMPIFLE" or ItemName == "JUMPIFLT" or ItemName == "JUMPIFNOTEQ" or ItemName == "JUMPIFNOTLE" or ItemName == "JUMPIFNOTLT") then
-                AddRegisterUse(Item.Aux % 256)
+                AddRegisterUse(Reads, Item.Aux % 256)
             end
         elseif ItemName == "FORNPREP" or ItemName == "FORNLOOP" or ItemName == "FORGLOOP" then
-            AddRegisterRange(ItemA, ItemA + 2)
+            AddRegisterRange(Reads, ItemA, ItemA + 2)
         elseif ItemName == "CAPTURE" and (ItemA == 0 or ItemA == 1) then
-            AddRegisterUse(ItemB)
+            AddRegisterUse(Reads, ItemB)
         end
+        if ItemName == "LOADNIL" or ItemName == "LOADB" or ItemName == "LOADN" or ItemName == "LOADK" or ItemName == "LOADKX" or ItemName == "MOVE" or ItemName == "GETGLOBAL" or ItemName == "GETUPVAL" or ItemName == "GETTABLE" or ItemName == "GETTABLEKS" or ItemName == "GETTABLEN" or ItemName == "GETUDATAKS" or ItemName == "ADD" or ItemName == "SUB" or ItemName == "MUL" or ItemName == "DIV" or ItemName == "MOD" or ItemName == "POW" or ItemName == "IDIV" or ItemName == "AND" or ItemName == "OR" or ItemName == "ADDK" or ItemName == "SUBK" or ItemName == "MULK" or ItemName == "DIVK" or ItemName == "MODK" or ItemName == "POWK" or ItemName == "IDIVK" or ItemName == "ANDK" or ItemName == "ORK" or ItemName == "SUBRK" or ItemName == "DIVRK" or ItemName == "NOT" or ItemName == "MINUS" or ItemName == "LENGTH" or ItemName == "CONCAT" or ItemName == "NEWTABLE" or ItemName == "DUPTABLE" or ItemName == "GETIMPORT" or ItemName == "NEWCLOSURE" or ItemName == "DUPCLOSURE" then
+            AddRegisterUse(Writes, ItemA)
+        elseif ItemName == "NAMECALL" or ItemName == "NAMECALLUDATA" then
+            AddRegisterUse(Writes, ItemA)
+            AddRegisterUse(Writes, ItemA + 1)
+        elseif ItemName == "CALL" or ItemName == "CALLFB" then
+            if ItemC == 0 then
+                AddRegisterRange(Writes, ItemA, Proto.MaxStackSize - 1)
+            elseif ItemC > 1 then
+                AddRegisterRange(Writes, ItemA, ItemA + ItemC - 2)
+            end
+        elseif ItemName == "GETVARARGS" then
+            if ItemB == 0 then
+                AddRegisterRange(Writes, ItemA, Proto.MaxStackSize - 1)
+            elseif ItemB > 1 then
+                AddRegisterRange(Writes, ItemA, ItemA + ItemB - 2)
+            end
+        elseif ItemName == "FORNPREP" or ItemName == "FORNLOOP" or ItemName == "FORGPREP" or ItemName == "FORGPREP_INEXT" or ItemName == "FORGPREP_NEXT" or ItemName == "FORGLOOP" then
+            AddRegisterRange(Writes, ItemA, ItemA + 3)
+        end
+        RegisterReads[ItemIndex] = Reads
+        RegisterWrites[ItemIndex] = Writes
         YieldControl()
+    end
+    local RegisterUseCountsByInstruction = {}
+    local UsesAfterWrite = {}
+    for ItemIndex = #Proto.Instructions, 1, -1 do
+        local Writes = RegisterWrites[ItemIndex]
+        local UsesForInstruction = {}
+        for Register in pairs(Writes) do
+            UsesForInstruction[Register] = UsesAfterWrite[Register] or 0
+            UsesAfterWrite[Register] = 0
+        end
+        for Register in pairs(RegisterReads[ItemIndex]) do
+            UsesAfterWrite[Register] = (UsesAfterWrite[Register] or 0) + 1
+        end
+        RegisterUseCountsByInstruction[ItemIndex] = UsesForInstruction
     end
     local Registers = {}
     local Declared = {}
@@ -859,7 +896,8 @@ local function ReconstructLinear(Proto, Strings, Options, Parsed, CaptureNames, 
     end
     local function WriteReg(Register, Expression, PC, KnownValue, IsKnown, ExpressionValue, InlineCandidate)
         local CanInline = InlineCandidate == true
-            and RegisterUseCounts[Register] == 1
+            and RegisterUseCountsByInstruction[ActiveInstructionIndex]
+            and RegisterUseCountsByInstruction[ActiveInstructionIndex][Register] == 1
             and not Declared[Register]
             and not RegisterWritten[Register]
             and not HasNamedDebugLocal(Register, PC)
@@ -875,7 +913,6 @@ local function ReconstructLinear(Proto, Strings, Options, Parsed, CaptureNames, 
         if CanInline then
             return nil
         end
-        RegisterWritten[Register] = true
         local ExistingName = Registers[Register]
         if not ExistingName then
             ExistingName = GetDebugLocalName(Proto, Register, PC, UsedNames, UsePascalCase)
@@ -1158,6 +1195,7 @@ local function ReconstructLinear(Proto, Strings, Options, Parsed, CaptureNames, 
             CloseBlock(Block)
         end
         local ActiveInstruction = Instructions[InstructionIndex]
+        ActiveInstructionIndex = InstructionIndex
         CurrentPC = ActiveInstruction.PC
         local RepeatStart = RepeatLoopStarts[InstructionIndex]
         if RepeatStart then
@@ -1820,7 +1858,7 @@ local function FindBytefall()
 end
 local Ninefaces = {
     Name = "9faces Decompiler",
-    Version = "0.3.0-beta.14",
+    Version = "0.3.0-beta.15",
     BytecodeVersionMin = BytecodeVersionMin,
     BytecodeVersionMax = BytecodeVersionMax,
     BytefallFallback = nil,
