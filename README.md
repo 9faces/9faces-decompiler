@@ -22,7 +22,7 @@ A headless executor-side Luau bytecode reader, disassembler, and source reconstr
 
 Valm Dex ++ can load this module as its primary decompiler and pass the selected script's bytecode directly to it. The native reconstructor runs first; Bytefall remains an optional fallback when native reconstruction cannot recover source.
 
-The primary global API is `ValmDecompiler`. The previous `Ninefaces` and `NinefacesInstalledDecompile` globals remain available as compatibility aliases, so existing Valm Dex integrations do not need to be rewritten just to use this renamed build.
+The public global API is `ValmDecompiler`, with `ValmDecompilerInstalledDecompile` as the installed decompile bridge.
 
 ## Limits
 
