@@ -899,6 +899,33 @@ local function ReconstructLinear(Proto, Strings, Options, Parsed, CaptureNames, 
             or Lower:match("^pcall%d+$") ~= nil
             or Lower:match("^xpcall%d+$") ~= nil
     end
+    local MethodResultNames = {
+        GetChildren = "Children",
+        GetDescendants = "Descendants",
+        GetPlayers = "Players",
+        GetAttributes = "Attributes",
+        GetAttribute = "Attribute",
+        GetFullName = "FullName",
+        GetName = "Name",
+        GetPivot = "Pivot",
+        GetDebugId = "DebugId",
+        GetMouse = "Mouse",
+        GetMouseLocation = "MouseLocation",
+        GetProductInfo = "ProductInfo",
+        GetUserThumbnailAsync = "Thumbnail",
+        GetUserIdFromNameAsync = "UserId",
+        GetNameFromUserIdAsync = "Username",
+        GetPropertyChangedSignal = "PropertyChangedSignal",
+        GetAsync = "Response",
+        PostAsync = "Response",
+        HttpGet = "Response",
+        RequestAsync = "Response",
+        JSONDecode = "DecodedData",
+        JSONEncode = "EncodedData",
+        Connect = "Connection",
+        Once = "Connection",
+        Clone = "Clone"
+    }
     local function InferRegisterName(Expression, Register)
         local ServiceName = Expression:match('GetService%s*%(%s*"([^"]+)"')
         if ServiceName and ServiceName ~= "" then
@@ -918,34 +945,7 @@ local function ReconstructLinear(Proto, Strings, Options, Parsed, CaptureNames, 
             return PascalCase(IndexedName)
         end
         local MethodName = Expression:match("[:%.]([%a_][%w_]*)%s*%(")
-        local MethodResults = {
-            GetChildren = "Children",
-            GetDescendants = "Descendants",
-            GetPlayers = "Players",
-            GetAttributes = "Attributes",
-            GetAttribute = "Attribute",
-            GetFullName = "FullName",
-            GetName = "Name",
-            GetPivot = "Pivot",
-            GetDebugId = "DebugId",
-            GetMouse = "Mouse",
-            GetMouseLocation = "MouseLocation",
-            GetProductInfo = "ProductInfo",
-            GetUserThumbnailAsync = "Thumbnail",
-            GetUserIdFromNameAsync = "UserId",
-            GetNameFromUserIdAsync = "Username",
-            GetPropertyChangedSignal = "PropertyChangedSignal",
-            GetAsync = "Response",
-            PostAsync = "Response",
-            HttpGet = "Response",
-            RequestAsync = "Response",
-            JSONDecode = "DecodedData",
-            JSONEncode = "EncodedData",
-            Connect = "Connection",
-            Once = "Connection",
-            Clone = "Clone"
-        }
-        local MethodResult = MethodName and MethodResults[MethodName]
+        local MethodResult = MethodName and MethodResultNames[MethodName]
         if MethodResult then
             return PascalCase(MethodResult)
         end
