@@ -774,6 +774,42 @@ local function ReconstructLinear(Proto, Strings, Options, Parsed, CaptureNames, 
     local KnownValues = {}
     local KnownValueFlags = {}
     local RegisterWritten = {}
+    local RegisterDebugLocals = {}
+    local DebugLocalNames = {}
+    local function GetActiveDebugLocal(Register, PC)
+        for _, Local in ipairs(Proto.DebugLocals) do
+            if Local.Register == Register and Local.StartPC <= PC and Local.EndPC > PC and type(Local.Name) == "string" and Local.Name ~= "" then
+                return Local
+            end
+        end
+        return nil
+    end
+    local function RefreshRegisterLocal(Register, PC)
+        local ActiveLocal = GetActiveDebugLocal(Register, PC or CurrentPC)
+        if not ActiveLocal or RegisterDebugLocals[Register] == ActiveLocal then
+            return
+        end
+        RegisterDebugLocals[Register] = ActiveLocal
+        local Name = DebugLocalNames[ActiveLocal]
+        if not Name then
+            local Base = UsePascalCase and PascalCase(ActiveLocal.Name) or (IsIdentifier(ActiveLocal.Name) and ActiveLocal.Name or PascalCase(ActiveLocal.Name))
+            Name = Base
+            local Suffix = 2
+            while UsedNames[Name] do
+                Name = Base .. tostring(Suffix)
+                Suffix = Suffix + 1
+            end
+            UsedNames[Name] = true
+            DebugLocalNames[ActiveLocal] = Name
+        end
+        Registers[Register] = Name
+        RegisterExpressions[Register] = Name
+        RegisterInline[Register] = false
+        KnownValues[Register] = nil
+        KnownValueFlags[Register] = false
+        RegisterWritten[Register] = false
+        Declared[Register] = false
+    end
     local HighestRegister = Proto.NumParams - 1
     local MultiValue = nil
     local MultiValueStart = nil
@@ -783,11 +819,17 @@ local function ReconstructLinear(Proto, Strings, Options, Parsed, CaptureNames, 
         Params[#Params + 1] = Name
         Registers[Register] = Name
         RegisterExpressions[Register] = Name
+        local ActiveLocal = GetActiveDebugLocal(Register, 0)
+        if ActiveLocal then
+            RegisterDebugLocals[Register] = ActiveLocal
+            DebugLocalNames[ActiveLocal] = Name
+        end
         Declared[Register] = true
         RegisterWritten[Register] = true
         HighestRegister = math.max(HighestRegister, Register)
     end
     local function GetReg(Register, PC)
+        RefreshRegisterLocal(Register, PC or CurrentPC)
         if RegisterInline[Register] then
             return RegisterExpressions[Register] or "nil"
         end
@@ -800,6 +842,7 @@ local function ReconstructLinear(Proto, Strings, Options, Parsed, CaptureNames, 
         return Value
     end
     local function GetRegExpression(Register)
+        RefreshRegisterLocal(Register, CurrentPC)
         if RegisterInline[Register] then
             return RegisterExpressions[Register] or "nil"
         end
@@ -872,14 +915,15 @@ local function ReconstructLinear(Proto, Strings, Options, Parsed, CaptureNames, 
         return "Local" .. tostring(Register + 1)
     end
     local function DeclareRegister(Register, PC)
+        RefreshRegisterLocal(Register, PC)
         local Name = Registers[Register]
         if not Name then
             Name = GetDebugLocalName(Proto, Register, PC, UsedNames, UsePascalCase)
             Registers[Register] = Name
         end
         if not Declared[Register] then
-            if not TopDeclarationSet[Register] then
-                TopDeclarationSet[Register] = true
+            if not TopDeclarationSet[Name] then
+                TopDeclarationSet[Name] = true
                 TopDeclarations[#TopDeclarations + 1] = Name
             end
             Declared[Register] = true
@@ -895,6 +939,7 @@ local function ReconstructLinear(Proto, Strings, Options, Parsed, CaptureNames, 
         return false
     end
     local function WriteReg(Register, Expression, PC, KnownValue, IsKnown, ExpressionValue, InlineCandidate)
+        RefreshRegisterLocal(Register, PC)
         local CanInline = InlineCandidate == true
             and RegisterUseCountsByInstruction[ActiveInstructionIndex]
             and RegisterUseCountsByInstruction[ActiveInstructionIndex][Register] == 1
@@ -1917,7 +1962,7 @@ local function FindBytefall()
 end
 local Ninefaces = {
     Name = "9faces Decompiler",
-    Version = "0.3.0-beta.19",
+    Version = "0.3.0-beta.20",
     BytecodeVersionMin = BytecodeVersionMin,
     BytecodeVersionMax = BytecodeVersionMax,
     BytefallFallback = nil,
@@ -2103,7 +2148,7 @@ function Ninefaces.GetStatus()
         RobloxOpcodeNormalization = true,
         RobloxOpcodeMultiplier = RobloxOpcodeMultiplier,
         BytefallConnected = type(Fallback) == "function",
-        NativeDecompiler = "Structured control flow, nested closures, register-lifetime analysis, single-use expression forwarding, semantic local naming, varargs, table reconstruction, and constant folding",
+        NativeDecompiler = "Structured control flow, nested closures, debug-local register lifetime tracking, single-use expression forwarding, semantic local naming, varargs, table reconstruction, and constant folding",
         SemanticLocalNaming = true,
         Disassembler = "Luau bytecode versions 3 through 14",
         CooperativeYield = type(task) == "table" and type(task.wait) == "function",
