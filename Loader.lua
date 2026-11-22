@@ -1199,6 +1199,9 @@ local function ReconstructLinear(Proto, Strings, Options, Parsed, CaptureNames, 
         return Lower == "variable"
             or Lower == "callback"
             or Lower == "instance"
+            or Lower == "function"
+            or Lower == "anonymous"
+            or Lower == "closure"
             or Lower == "pcall"
             or Lower == "xpcall"
             or Lower:match("^arg%d+$") ~= nil
@@ -1209,6 +1212,9 @@ local function ReconstructLinear(Proto, Strings, Options, Parsed, CaptureNames, 
             or Lower:match("^tmp%d+$") ~= nil
             or Lower:match("^pcall%d+$") ~= nil
             or Lower:match("^xpcall%d+$") ~= nil
+            or Lower:match("^function%d+$") ~= nil
+            or Lower:match("^closure%d+$") ~= nil
+            or Lower:match("^proto%d+$") ~= nil
     end
     local MethodResultNames = {
         GetChildren = "Children",
@@ -1240,6 +1246,14 @@ local function ReconstructLinear(Proto, Strings, Options, Parsed, CaptureNames, 
         GetTags = "Tags",
         GetPropertyChangedSignal = "PropertyChangedSignal",
         FindFirstAncestor = "Ancestor",
+        FindFirstAncestorOfClass = "Ancestor",
+        FindFirstAncestorWhichIsA = "Ancestor",
+        FindFirstChild = "Child",
+        FindFirstChildOfClass = "Child",
+        FindFirstChildWhichIsA = "Child",
+        WaitForChild = "Child",
+        GetBoundingBox = "BoundingBox",
+        GetExtentsSize = "ExtentsSize",
         GetAsync = "Response",
         PostAsync = "Response",
         HttpGet = "Response",
@@ -2260,6 +2274,18 @@ local function ReconstructLinear(Proto, Strings, Options, Parsed, CaptureNames, 
                 FunctionLines[#FunctionLines + 1] = "    " .. BodyLine
             end
             local FunctionExpression = "function(" .. table.concat(ChildParams, ", ") .. ")\n" .. table.concat(FunctionLines, "\n") .. (ChildBody ~= "" and "\n" or "") .. "end"
+            RefreshRegisterLocal(A, PC)
+            local ChildDebugName = type(ChildProto.DebugName) == "string" and ChildProto.DebugName or ""
+            local ActiveFunctionLocal = GetActiveDebugLocal(A, PC)
+            if ChildDebugName ~= "" and #ChildDebugName >= 3 and not IsGenericDebugName(ChildDebugName) and not RegisterWritten[A] and not Declared[A] and (not ActiveFunctionLocal or IsGenericDebugName(ActiveFunctionLocal.Name)) then
+                local FunctionName = GetFreshRegisterName(ChildDebugName)
+                Registers[A] = FunctionName
+                RegisterExpressions[A] = FunctionName
+                RegisterInline[A] = false
+                if ActiveFunctionLocal then
+                    DebugLocalNames[ActiveFunctionLocal] = FunctionName
+                end
+            end
             WriteReg(A, FunctionExpression, PC)
             InstructionIndex = InstructionIndex + CaptureCount
         elseif Name == "CAPTURE" then
@@ -2433,7 +2459,7 @@ local function FindBytefall()
 end
 local ValmDecompiler = {
     Name = "Valm Decompiler",
-    Version = "0.3.0-beta.27",
+    Version = "0.3.0-beta.28",
     BytecodeVersionMin = BytecodeVersionMin,
     BytecodeVersionMax = BytecodeVersionMax,
     BytefallFallback = nil,
