@@ -951,6 +951,8 @@ local function ReconstructLinear(Proto, Strings, Options, Parsed, CaptureNames, 
             RegisterWritten[Register] = true
             Registers[Register] = Name
             RegisterExpressions[Register] = Name
+        else
+            RegisterExpressions[Register] = nil
         end
     end
     local function GetConstantKnown(Constant)
@@ -1422,9 +1424,9 @@ local function ReconstructLinear(Proto, Strings, Options, Parsed, CaptureNames, 
             local ExpressionValue = GetProperty(GetRegExpression(B), Key.Value)
             WriteReg(A, Expression, PC, nil, false, ExpressionValue, true)
         elseif Name == "GETTABLE" then
-            WriteReg(A, GetReg(B) .. "[" .. GetReg(C) .. "]", PC)
+            WriteReg(A, GetReg(B) .. "[" .. GetReg(C) .. "]", PC, nil, false, nil, true)
         elseif Name == "GETTABLEN" then
-            WriteReg(A, GetReg(B) .. "[" .. tostring(C + 1) .. "]", PC)
+            WriteReg(A, GetReg(B) .. "[" .. tostring(C + 1) .. "]", PC, nil, false, nil, true)
         elseif Name == "SETTABLEKS" or Name == "SETUDATAKS" then
             local ConstantIndex = Name == "SETUDATAKS" and (Aux % 65536) or Aux
             local Key = GetConstant(Proto, ConstantIndex)
@@ -1888,7 +1890,7 @@ local function FindBytefall()
 end
 local Ninefaces = {
     Name = "9faces Decompiler",
-    Version = "0.3.0-beta.17",
+    Version = "0.3.0-beta.18",
     BytecodeVersionMin = BytecodeVersionMin,
     BytecodeVersionMax = BytecodeVersionMax,
     BytefallFallback = nil,
@@ -2074,7 +2076,7 @@ function Ninefaces.GetStatus()
         RobloxOpcodeNormalization = true,
         RobloxOpcodeMultiplier = RobloxOpcodeMultiplier,
         BytefallConnected = type(Fallback) == "function",
-        NativeDecompiler = "Structured branches, nested closures, varargs, semantic Roblox local naming, table reconstruction, register scope recovery, and constant folding",
+        NativeDecompiler = "Structured control flow, nested closures, register-lifetime analysis, single-use expression forwarding, semantic local naming, varargs, table reconstruction, and constant folding",
         SemanticLocalNaming = true,
         Disassembler = "Luau bytecode versions 3 through 14",
         CooperativeYield = type(task) == "table" and type(task.wait) == "function",
