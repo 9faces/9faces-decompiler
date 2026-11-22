@@ -947,8 +947,8 @@ local function ReconstructLinear(Proto, Strings, Options, Parsed, CaptureNames, 
         RegisterInline[Register] = false
         KnownValueFlags[Register] = false
         KnownValues[Register] = nil
-        RegisterWritten[Register] = true
         if Name then
+            RegisterWritten[Register] = true
             Registers[Register] = Name
             RegisterExpressions[Register] = Name
         end
@@ -1267,18 +1267,24 @@ local function ReconstructLinear(Proto, Strings, Options, Parsed, CaptureNames, 
             local A = Instructions[InstructionIndex].A
             if ForLoop.Kind == "Numeric" then
                 local VariableName = Registers[A + 3] or GetDebugLocalName(Proto, A + 3, Instructions[InstructionIndex].PC, UsedNames, UsePascalCase)
+                local InitialValue = GetReg(A + 2)
+                local LimitValue = GetReg(A)
+                local StepValue = GetReg(A + 1)
                 Registers[A + 3] = VariableName
                 Declared[A + 3] = true
                 InvalidateRegister(A)
                 InvalidateRegister(A + 1)
                 InvalidateRegister(A + 2)
                 InvalidateRegister(A + 3, VariableName)
-                EmitLine("for " .. VariableName .. " = " .. GetReg(A + 2) .. ", " .. GetReg(A) .. ", " .. GetReg(A + 1) .. " do")
+                EmitLine("for " .. VariableName .. " = " .. InitialValue .. ", " .. LimitValue .. ", " .. StepValue .. " do")
             else
                 local VariableCount = ForLoop.VariableCount
                 if VariableCount < 1 then
                     VariableCount = 2
                 end
+                local GeneratorExpression = GetReg(A)
+                local StateExpression = GetReg(A + 1)
+                local InitialExpression = GetReg(A + 2)
                 local Variables = {}
                 for Register = A + 3, A + 2 + VariableCount do
                     local VariableName = Registers[Register] or GetDebugLocalName(Proto, Register, Instructions[InstructionIndex].PC, UsedNames, UsePascalCase)
@@ -1290,7 +1296,7 @@ local function ReconstructLinear(Proto, Strings, Options, Parsed, CaptureNames, 
                 InvalidateRegister(A)
                 InvalidateRegister(A + 1)
                 InvalidateRegister(A + 2)
-                EmitLine("for " .. table.concat(Variables, ", ") .. " in " .. GetReg(A) .. ", " .. GetReg(A + 1) .. ", " .. GetReg(A + 2) .. " do")
+                EmitLine("for " .. table.concat(Variables, ", ") .. " in " .. GeneratorExpression .. ", " .. StateExpression .. ", " .. InitialExpression .. " do")
             end
             IndentLevel = IndentLevel + 1
             Blocks[#Blocks + 1] = {Kind = "For", EndIndex = ForLoop.LoopIndex}
@@ -1882,7 +1888,7 @@ local function FindBytefall()
 end
 local Ninefaces = {
     Name = "9faces Decompiler",
-    Version = "0.3.0-beta.16",
+    Version = "0.3.0-beta.17",
     BytecodeVersionMin = BytecodeVersionMin,
     BytecodeVersionMax = BytecodeVersionMax,
     BytefallFallback = nil,
