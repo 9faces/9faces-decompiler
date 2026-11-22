@@ -1,11 +1,3 @@
---[[
-____   ____      .__            
-\   \ /   /____  |  |   _____   
- \   Y   /\__  \ |  |  /     \  
-  \     /  / __ \|  |_|  Y Y  \ 
-   \___/  (____  /____/__|_|  / 
-               \/           \/  
---]]
 local Env = (type(getgenv) == "function" and getgenv()) or _G
 local GetScriptBytecode = Env.getscriptbytecode or Env.dumpstring or getscriptbytecode or dumpstring
 local ActiveBytecodeProvider = GetScriptBytecode
@@ -1450,7 +1442,7 @@ local function ReconstructLinear(Proto, Strings, Options, Parsed, CaptureNames, 
                 return nil, "Nested prototype index is invalid"
             end
             local ChildCaptureNames = {}
-            local CaptureCount = Name == "NEWCLOSURE" and ChildProto.NumUpvalues or 0
+            local CaptureCount = ChildProto.NumUpvalues
             for CaptureIndex = 1, CaptureCount do
                 local CaptureInstruction = Instructions[InstructionIndex + CaptureIndex]
                 if not CaptureInstruction or CaptureInstruction.Name ~= "CAPTURE" then
@@ -1651,7 +1643,7 @@ local function FindBytefall()
 end
 local Ninefaces = {
     Name = "9faces Decompiler",
-    Version = "0.3.0-beta.10",
+    Version = "0.3.0-beta.11",
     BytecodeVersionMin = BytecodeVersionMin,
     BytecodeVersionMax = BytecodeVersionMax,
     BytefallFallback = nil,
