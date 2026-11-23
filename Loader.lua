@@ -1677,23 +1677,28 @@ local function ReconstructLinear(Proto, Strings, Options, Parsed, CaptureNames, 
                     end
                 end
             end
-        elseif Name == "FORNPREP" then
-            for CandidateIndex = InstructionIndex + 1, #Instructions do
-                local Candidate = Instructions[CandidateIndex]
-                if Candidate.Name == "FORNLOOP" and Candidate.A == Instruction.A then
-                    ForLoopStarts[InstructionIndex] = {LoopIndex = CandidateIndex, Kind = "Numeric"}
-                    ForLoopEnds[CandidateIndex] = true
-                    break
+        elseif Name == "FORNPREP" or Name == "FORGPREP" or Name == "FORGPREP_INEXT" or Name == "FORGPREP_NEXT" then
+            local ExpectedLoopName = Name == "FORNPREP" and "FORNLOOP" or "FORGLOOP"
+            local CandidateIndex = GetTargetIndex(Instruction)
+            local Candidate = Instructions[CandidateIndex]
+            if not Candidate or Candidate.Name ~= ExpectedLoopName or Candidate.A ~= Instruction.A or GetTargetIndex(Candidate) ~= InstructionIndex + 1 then
+                CandidateIndex = nil
+                for SearchIndex = InstructionIndex + 1, #Instructions do
+                    local SearchCandidate = Instructions[SearchIndex]
+                    if SearchCandidate.Name == ExpectedLoopName and SearchCandidate.A == Instruction.A and GetTargetIndex(SearchCandidate) == InstructionIndex + 1 then
+                        CandidateIndex = SearchIndex
+                        Candidate = SearchCandidate
+                        break
+                    end
                 end
             end
-        elseif Name == "FORGPREP" or Name == "FORGPREP_INEXT" or Name == "FORGPREP_NEXT" then
-            for CandidateIndex = InstructionIndex + 1, #Instructions do
-                local Candidate = Instructions[CandidateIndex]
-                if Candidate.Name == "FORGLOOP" and Candidate.A == Instruction.A then
+            if CandidateIndex then
+                if Name == "FORNPREP" then
+                    ForLoopStarts[InstructionIndex] = {LoopIndex = CandidateIndex, Kind = "Numeric"}
+                else
                     ForLoopStarts[InstructionIndex] = {LoopIndex = CandidateIndex, Kind = "Generic", VariableCount = (Candidate.Aux or 2) % 256}
-                    ForLoopEnds[CandidateIndex] = true
-                    break
                 end
+                ForLoopEnds[CandidateIndex] = true
             end
         end
     end
@@ -1765,11 +1770,20 @@ local function ReconstructLinear(Proto, Strings, Options, Parsed, CaptureNames, 
             continue
         end
         if ForLoopEnds[InstructionIndex] then
-            if #Blocks == 0 or Blocks[#Blocks].Kind ~= "For" then
-                return nil, "For-loop end could not be matched"
+            local ForBlockIndex = nil
+            for BlockIndex = #Blocks, 1, -1 do
+                local Block = Blocks[BlockIndex]
+                if Block.Kind == "For" and Block.EndIndex == InstructionIndex then
+                    ForBlockIndex = BlockIndex
+                    break
+                end
             end
-            local ForBlock = table.remove(Blocks)
-            CloseBlock(ForBlock)
+            if not ForBlockIndex then
+                return nil, "For-loop end at instruction " .. tostring(ActiveInstruction.PC) .. " has no matching loop start"
+            end
+            while #Blocks >= ForBlockIndex do
+                CloseBlock(table.remove(Blocks))
+            end
             InstructionIndex = InstructionIndex + 1
             continue
         end
