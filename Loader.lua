@@ -2501,7 +2501,7 @@ local function FindBytefall()
 end
 local ValmDecompiler = {
     Name = "Valm Decompiler",
-    Version = "0.3.0-beta.29",
+    Version = "0.3.0-beta.30",
     BytecodeVersionMin = BytecodeVersionMin,
     BytecodeVersionMax = BytecodeVersionMax,
     BytefallFallback = nil,
