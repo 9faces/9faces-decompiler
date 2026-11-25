@@ -1851,6 +1851,7 @@ local function ReconstructLinear(Proto, Strings, Options, Parsed, CaptureNames, 
             local TopBlock = Blocks[#Blocks]
             local LoopBlockIndex = nil
             local LoopAction = nil
+            local ElseBlockIndex = nil
             for BlockIndex = #Blocks, 1, -1 do
                 local Block = Blocks[BlockIndex]
                 if Block.Kind == "While" and TargetIndex == Block.EndIndex then
@@ -1867,8 +1868,26 @@ local function ReconstructLinear(Proto, Strings, Options, Parsed, CaptureNames, 
                     break
                 end
             end
+            if Name == "JUMP" and TargetIndex > InstructionIndex + 1 then
+                for BlockIndex = #Blocks, 1, -1 do
+                    local CandidateBlock = Blocks[BlockIndex]
+                    if CandidateBlock.Kind == "If" and InstructionIndex + 1 == CandidateBlock.EndIndex and TargetIndex > CandidateBlock.EndIndex then
+                        ElseBlockIndex = BlockIndex
+                        break
+                    end
+                end
+            end
             if LoopBlockIndex then
                 EmitLine(LoopAction)
+            elseif ElseBlockIndex then
+                while #Blocks > ElseBlockIndex do
+                    CloseBlock(table.remove(Blocks))
+                end
+                local ElseBlock = Blocks[ElseBlockIndex]
+                IndentLevel = math.max(0, IndentLevel - 1)
+                EmitLine("else")
+                IndentLevel = IndentLevel + 1
+                ElseBlock.EndIndex = TargetIndex
             elseif Name == "JUMP" and TopBlock and TopBlock.Kind == "If" and InstructionIndex + 1 == TopBlock.EndIndex and TargetIndex > TopBlock.EndIndex then
                 IndentLevel = math.max(0, IndentLevel - 1)
                 EmitLine("else")
